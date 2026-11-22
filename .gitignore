@@ -1,0 +1,21 @@
+# Ignorar variables de entorno reales
+.env
+
+# Ignorar dependencias y entornos virtuales
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Ignorar archivos de sistema operativo y editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+
+# Ignorar datos locales temporales
+pg_data/
+mongo_data/
+redis_data/
+minio_data/

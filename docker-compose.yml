@@ -1,0 +1,217 @@
+services:
+  # Levantar puerta de enlace unica
+  gateway:
+    image: nginx:alpine
+    container_name: ts_gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - catalog-service
+      - booking-service
+      - social-service
+      - ai-service
+      - bi-service
+    networks:
+      - frontend_net
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar microservicio de usuarios y autenticacion
+  auth-service:
+    build: ./services/auth-users
+    container_name: ts_auth
+    volumes:
+      - ./services/auth-users/src:/app/src
+    environment:
+      - DB_URL=postgresql://${DB_USER}:${DB_PASS}@db-core:5432/db_users
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      db-core:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar microservicio de catalogo y validacion sustentable
+  catalog-service:
+    build: ./services/catalog-audit
+    container_name: ts_catalog
+    volumes:
+      - ./services/catalog-audit/src:/app/src
+    environment:
+      - DB_URL=postgresql://${DB_USER}:${DB_PASS}@db-core:5432/db_catalog
+      - JWT_SECRET=${JWT_SECRET}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_USER}
+      - MINIO_SECRET_KEY=${MINIO_PASS}
+      - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
+    depends_on:
+      db-core:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar microservicio de reservas, cupos y pagos
+  booking-service:
+    build: ./services/booking-payment
+    container_name: ts_booking
+    volumes:
+      - ./services/booking-payment/src:/app/src
+    environment:
+      - DB_URL=postgresql://${DB_USER}:${DB_PASS}@db-core:5432/db_bookings
+      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
+      - STRIPE_API_KEY=${STRIPE_API_KEY}
+    depends_on:
+      db-core:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar microservicio de resenas y mensajeria
+  social-service:
+    build: ./services/social-chat
+    container_name: ts_social
+    volumes:
+      - ./services/social-chat/src:/app/src
+    environment:
+      - MONGO_URL=mongodb://db-social:27017/db_social
+      - JWT_SECRET=${JWT_SECRET}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_USER}
+      - MINIO_SECRET_KEY=${MINIO_PASS}
+      - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
+    depends_on:
+      - db-social
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar microservicio de motor de recomendaciones IA
+  ai-service:
+    build: ./services/ai-recommender
+    container_name: ts_ai
+    volumes:
+      - ./services/ai-recommender/src:/app/src
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY}
+      - CATALOG_SERVICE_URL=http://catalog-service:8000
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar microservicio de analitica y panel BI
+  bi-service:
+    build: ./services/bi-analytics
+    container_name: ts_bi
+    volumes:
+      - ./services/bi-analytics/src:/app/src
+    environment:
+      - DB_URL=postgresql://${DB_USER}:${DB_PASS}@db-core:5432/db_analytics
+      - JWT_SECRET=${JWT_SECRET}
+      - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
+      - CATALOG_SERVICE_URL=http://catalog-service:8000
+    depends_on:
+      db-core:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar motor relacional PostgreSQL con soporte PostGIS
+  db-core:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: ts_postgres_postgis
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/init-dbs.sql:/docker-entrypoint-initdb.d/init-dbs.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar base documental MongoDB para chat y resenas
+  db-social:
+    image: mongo:7-jammy
+    container_name: ts_mongodb
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar cache en memoria Redis para bloqueos de cupo
+  redis:
+    image: redis:7-alpine
+    container_name: ts_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+  # Levantar gestor de colas RabbitMQ para eventos asincronos
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ts_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${MQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${MQ_PASS}
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+# Levantar almacenamiento de objetos compatible con S3 (RustFS) para PDFs y fotos
+  minio:
+    image: rustfs/rustfs:latest
+    container_name: ts_minio
+    environment:
+      RUSTFS_ACCESS_KEY: ${MINIO_USER}
+      RUSTFS_SECRET_KEY: ${MINIO_PASS}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+networks:
+  frontend_net:
+    driver: bridge
+  backend_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  pg_data:
+  mongo_data:
+  redis_data:
+  minio_data:

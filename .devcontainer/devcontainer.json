@@ -1,0 +1,16 @@
+{
+    "name": "Turismo Sustentable Dev Environment",
+    "dockerComposeFile": "../docker-compose.yml",
+    "service": "auth-service",
+    "workspaceFolder": "/app",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-azuretools.vscode-docker",
+                "cweijan.vscode-database-client2",
+                "humao.rest-client"
+            ]
+        }
+    }
+}
