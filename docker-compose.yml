@@ -132,6 +132,14 @@ services:
       - backend_net
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ts_frontend
+    networks:
+      - backend_net
+
   # Levantar motor relacional PostgreSQL con soporte PostGIS
   db-core:
     image: postgis/postgis:16-3.4-alpine
