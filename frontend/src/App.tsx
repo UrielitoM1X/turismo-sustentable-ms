@@ -81,8 +81,11 @@ export default function App() {
   const [provMsg, setProvMsg] = useState("");
 
   // IA y BI
-  const [aiQuery, setAiQuery] = useState({ borough: "Xochimilco", max_budget: 1000, interests: "naturaleza y agroecología" });
+  const [aiMessage, setAiMessage] = useState(
+    "Busco algo de naturaleza y accesible para ir con mi perro"
+  );
   const [aiResult, setAiResult] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const [biMetrics, setBiMetrics] = useState<any>(null);
 
   const loadExperiences = async () => {
@@ -107,12 +110,16 @@ export default function App() {
     }
   };
 
+  const [biError, setBiError] = useState("");
+
   const loadBiMetrics = async () => {
+    setBiError("");
     try {
-      const data = await apiFetch<any>("/api/bi/analytics/overview");
+      const data = await apiFetch<any>("/api/bi/dashboard/summary");
       setBiMetrics(data);
-    } catch {
+    } catch (err: any) {
       setBiMetrics(null);
+      setBiError(err.message);
     }
   };
 
@@ -146,16 +153,13 @@ export default function App() {
         setSession(getUserSession());
         setTab("explorar");
       } else {
-        const form = new URLSearchParams();
-        form.append("username", authEmail);
-        form.append("password", authPassword);
-        const res = await fetch("/api/auth/users/login", {
+        const data = await apiFetch<any>("/api/auth/users/login", {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: form.toString(),
+          body: JSON.stringify({
+            email: authEmail,
+            password: authPassword,
+          }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Credenciales incorrectas");
         saveUserSession(data.access_token, data.role, authEmail);
         setSession(getUserSession());
         setTab("explorar");
@@ -243,14 +247,17 @@ export default function App() {
   // Consultar Recomendador IA
   const handleAskAi = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAiLoading(true);
     try {
-      const data = await apiFetch("/api/ai/recommendations/suggest", {
+      const data = await apiFetch("/api/ai/assistant/chat", {
         method: "POST",
-        body: JSON.stringify(aiQuery),
+        body: JSON.stringify({ message: aiMessage }),
       });
       setAiResult(data);
     } catch (err: any) {
       setAiResult({ error: err.message });
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -526,7 +533,8 @@ export default function App() {
                       className="w-full bg-[#F2EFE9] rounded-xl px-4 h-11 text-sm"
                     >
                       <option value="TOURIST">Turista</option>
-                      <option value="PROVIDER">Proveedor Ecoturístico</option>
+                      <option value="PROVIDER">Proveedor</option>
+                      <option value="ADMIN">Admin</option>
                     </select>
                   </div>
                 </>
@@ -651,52 +659,81 @@ export default function App() {
         {/* TAB 5: ASISTENTE IA */}
         {tab === "ia" && (
           <div className="max-w-2xl mx-auto bg-white rounded-3xl p-8 border border-[#E3E5D8]">
-            <h1 className="font-serif text-2xl mb-2">Recomendador Ecoturístico IA</h1>
+            <h1 className="font-serif text-2xl mb-2">Asistente Ecoturístico IA</h1>
             <p className="text-xs text-[#63665E] mb-6">
-              Optimiza tu ruta respetando la capacidad de carga ambiental de cada alcaldía.
+              Describe qué tipo de experiencia sustentable buscas (alcaldía, accesibilidad, mascotas o presupuesto).
             </p>
-            <form onSubmit={handleAskAi} className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            <form onSubmit={handleAskAi} className="flex flex-col sm:flex-row gap-3 mb-6">
               <input
-                value={aiQuery.borough}
-                onChange={(e) => setAiQuery({ ...aiQuery, borough: e.target.value })}
-                placeholder="Alcaldía"
-                className="bg-[#F2EFE9] rounded-xl px-4 h-11 text-sm"
-              />
-              <input
-                type="number"
-                value={aiQuery.max_budget}
-                onChange={(e) => setAiQuery({ ...aiQuery, max_budget: Number(e.target.value) })}
-                placeholder="Presupuesto MXN"
-                className="bg-[#F2EFE9] rounded-xl px-4 h-11 text-sm"
+                required
+                value={aiMessage}
+                onChange={(e) => setAiMessage(e.target.value)}
+                placeholder="Ej. Busco algo de naturaleza en Xochimilco..."
+                className="flex-1 bg-[#F2EFE9] rounded-xl px-4 h-11 text-sm"
               />
               <button
+                disabled={aiLoading}
                 type="submit"
-                className="bg-[#728C69] text-white rounded-xl h-11 text-sm font-medium"
+                className="bg-[#728C69] hover:bg-[#5B7153] text-white rounded-xl px-6 h-11 text-sm font-medium transition"
               >
-                Sugerir Ruta
+                {aiLoading ? "Consultando..." : "Recomendar"}
               </button>
             </form>
-            {aiResult && (
-              <pre className="bg-[#F2EFE9] p-4 rounded-2xl text-xs overflow-auto">
-                {JSON.stringify(aiResult, null, 2)}
-              </pre>
+
+            {aiResult?.assistant_reply && (
+              <div className="bg-[#F2EFE9] border border-[#E3E5D8] p-5 rounded-2xl text-sm text-[#1E201D] leading-relaxed">
+                {aiResult.assistant_reply}
+              </div>
+            )}
+            {aiResult?.error && (
+              <p className="text-xs text-red-600">{aiResult.error}</p>
             )}
           </div>
         )}
 
         {/* TAB 6: PANEL BI */}
         {tab === "bi" && (
-          <div className="max-w-3xl mx-auto bg-white rounded-3xl p-8 border border-[#E3E5D8]">
-            <h1 className="font-serif text-2xl mb-2">Inteligencia de Negocios e Impacto Ambiental</h1>
+          <div className="max-w-4xl mx-auto">
+            <h1 className="font-serif text-3xl mb-2">Impacto Ambiental y Métricas BI</h1>
             <p className="text-xs text-[#63665E] mb-6">
-              Métricas consolidadas desde RabbitMQ, PostgreSQL y Redis.
+              Indicadores actualizados en tiempo real mediante eventos de RabbitMQ.
             </p>
-            {biMetrics ? (
-              <pre className="bg-[#F2EFE9] p-4 rounded-2xl text-xs overflow-auto">
-                {JSON.stringify(biMetrics, null, 2)}
-              </pre>
+
+            {biError ? (
+              <div className="bg-white rounded-3xl p-8 border border-[#E3E5D8] text-sm text-amber-800">
+                Acceso restringido: {biError}. Inicia sesión con una cuenta de <strong>Administrador</strong> para ver los KPIs financieros.
+              </div>
+            ) : biMetrics?.kpis ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white rounded-2xl p-5 border border-[#E3E5D8]">
+                  <span className="text-xs text-[#63665E]">Reservas Totales</span>
+                  <p className="font-serif text-3xl font-bold text-[#1E201D] mt-1">
+                    {biMetrics.kpis.total_bookings}
+                  </p>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-[#E3E5D8]">
+                  <span className="text-xs text-[#63665E]">Ingresos Generados</span>
+                  <p className="font-serif text-3xl font-bold text-[#3B523E] mt-1">
+                    ${biMetrics.kpis.total_revenue}
+                  </p>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-[#E3E5D8]">
+                  <span className="text-xs text-[#63665E]">Fondo Ecológico</span>
+                  <p className="font-serif text-3xl font-bold text-[#728C69] mt-1">
+                    ${biMetrics.kpis.total_impact_fund}
+                  </p>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-[#E3E5D8]">
+                  <span className="text-xs text-[#63665E]">Turistas Movilizados</span>
+                  <p className="font-serif text-3xl font-bold text-[#C81D77] mt-1">
+                    {biMetrics.kpis.total_tourists_mobilized}
+                  </p>
+                </div>
+              </div>
             ) : (
-              <p className="text-sm text-[#63665E]">Cargando indicadores analíticos...</p>
+              <div className="bg-white rounded-3xl p-8 border border-[#E3E5D8] text-sm text-[#63665E]">
+                Cargando indicadores analíticos...
+              </div>
             )}
           </div>
         )}

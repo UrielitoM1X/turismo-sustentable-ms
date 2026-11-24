@@ -31,6 +31,8 @@ services:
     depends_on:
       db-core:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - backend_net
     restart: unless-stopped
@@ -53,6 +55,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     networks:
       - backend_net
     restart: unless-stopped
@@ -95,6 +99,7 @@ services:
       - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
     depends_on:
       - db-social
+      - rabbitmq
     networks:
       - backend_net
     restart: unless-stopped
