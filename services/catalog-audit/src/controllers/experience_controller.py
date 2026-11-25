@@ -6,28 +6,27 @@ from src.schemas.catalog_schema import ExperienceCreateRequest, CDMX_BOROUGHS
 
 
 def create_experience(db: Session, provider_id: int, data: ExperienceCreateRequest) -> dict:
-    # Bloquear publicacion si el proveedor no tiene auditoria aprobada
-    approved_audit = db.query(SustainabilityAudit).filter(
+    # Verificar que el proveedor tenga al menos una auditoria enviada (PENDING o APPROVED)
+    has_audit = db.query(SustainabilityAudit).filter(
         SustainabilityAudit.provider_id == provider_id,
-        SustainabilityAudit.status == "APPROVED"
+        SustainabilityAudit.status.in_(["PENDING", "APPROVED"])
     ).first()
 
-    if not approved_audit:
+    if not has_audit:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Proveedor sin validacion sustentable aprobada"
+            detail="Debes adjuntar evidencias ambientales antes de registrar la actividad"
         )
 
-    # Validar delimitacion geografica estricta dentro de alcaldias de CDMX
     if data.borough_cdmx not in CDMX_BOROUGHS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La experiencia debe ubicarse dentro de una alcaldia valida de la CDMX"
         )
 
-    # Construir punto geografico WGS84 para PostGIS
     geo_point = WKTElement(f"POINT({data.longitude} {data.latitude})", srid=4326)
 
+    # Nace inactiva (is_active=False) hasta que el Administrador apruebe la auditoria
     experience = Experience(
         provider_id=provider_id,
         title=data.title,
@@ -40,13 +39,19 @@ def create_experience(db: Session, provider_id: int, data: ExperienceCreateReque
         max_capacity=data.max_capacity,
         pet_friendly=data.pet_friendly,
         accessible=data.accessible,
-        sustainable_practices=data.sustainable_practices
+        sustainable_practices=data.sustainable_practices,
+        is_active=False
     )
     db.add(experience)
     db.commit()
     db.refresh(experience)
 
-    return {"id": experience.id, "title": experience.title, "borough_cdmx": experience.borough_cdmx}
+    return {
+        "id": experience.id,
+        "title": experience.title,
+        "borough_cdmx": experience.borough_cdmx,
+        "is_active": experience.is_active
+    }
 
 
 def search_experiences(
@@ -57,7 +62,6 @@ def search_experiences(
     pet_friendly: bool | None = None,
     accessible: bool | None = None
 ) -> list[dict]:
-    # Filtrar experiencias activas segun criterios del turista
     query = db.query(Experience).filter(Experience.is_active.is_(True))
 
     if q:
@@ -83,7 +87,8 @@ def search_experiences(
             "price": exp.price,
             "max_capacity": exp.max_capacity,
             "pet_friendly": exp.pet_friendly,
-            "accessible": exp.accessible
+            "accessible": exp.accessible,
+            "sustainable_practices": exp.sustainable_practices
         }
         for exp in results
     ]

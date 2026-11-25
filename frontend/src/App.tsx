@@ -11,6 +11,10 @@ import {
   X,
   Star,
   Camera,
+  MessageSquare,
+  Send,
+  BarChart3,
+  Lock,
 } from "lucide-react";
 import Header, { RouteView } from "./components/Header";
 import HomePage from "./pages/HomePage";
@@ -24,6 +28,20 @@ import {
   clearUserSession,
 } from "./api/client";
 
+export interface ActividadConProveedor extends ActividadItem {
+  provider_id?: number;
+}
+
+function getUserIdFromToken(token: string | null): number | null {
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload?.sub ? Number(payload.sub) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [view, setView] = useState<RouteView>("home");
   const [lang, setLang] = useState<"es" | "en">("es");
@@ -31,7 +49,7 @@ export default function App() {
   const [authNotice, setAuthNotice] = useState("");
 
   // Catálogo y filtros
-  const [experiences, setExperiences] = useState<ActividadItem[]>([]);
+  const [experiences, setExperiences] = useState<ActividadConProveedor[]>([]);
   const [searchText, setSearchText] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todas");
   const [onlyPetFriendly, setOnlyPetFriendly] = useState(false);
@@ -63,8 +81,9 @@ export default function App() {
     });
   };
 
-  // Detalle, Reseñas (social-service) y Checkout
-  const [detailExp, setDetailExp] = useState<ActividadItem | null>(null);
+  // Detalle, Reseñas y Chat Directo (social-service)
+  const [detailExp, setDetailExp] = useState<ActividadConProveedor | null>(null);
+  const [detailTab, setDetailTab] = useState<"reviews" | "chat">("reviews");
   const [reviewsData, setReviewsData] = useState<{
     average_rating: number;
     total_reviews: number;
@@ -77,7 +96,14 @@ export default function App() {
   const [reviewMsg, setReviewMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
-  const [checkoutExp, setCheckoutExp] = useState<ActividadItem | null>(null);
+  // Estado del Chat con la cooperativa
+  const [chatHistory, setChatHistory] = useState<any[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState("");
+
+  // Checkout
+  const [checkoutExp, setCheckoutExp] = useState<ActividadConProveedor | null>(null);
   const [bookingDate, setBookingDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -89,7 +115,7 @@ export default function App() {
   const [bookingReceipt, setBookingReceipt] = useState<any>(null);
   const [bookingError, setBookingError] = useState("");
 
-  // Mis Reservas
+  // Mis Reservas (también se usa para validar elegibilidad de reseña)
   const [myBookings, setMyBookings] = useState<any[]>([]);
 
   // Guía IA
@@ -105,10 +131,31 @@ export default function App() {
 
   const loadCatalog = async () => {
     try {
-      const list = await apiFetch<ActividadItem[]>("/api/catalog/experiences/");
+      const list = await apiFetch<ActividadConProveedor[]>("/api/catalog/experiences/");
       setExperiences(list);
     } catch {
       setExperiences([]);
+    }
+  };
+
+  const [bookingsError, setBookingsError] = useState("");
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+
+  const loadMyBookings = async () => {
+    if (!session.token) {
+      setMyBookings([]);
+      return;
+    }
+    setBookingsLoading(true);
+    setBookingsError("");
+    try {
+      const list = await apiFetch<any[]>("/api/bookings/reservations/my-bookings");
+      setMyBookings(Array.isArray(list) ? list : []);
+    } catch (err: any) {
+      setBookingsError(err.message || "Error al cargar reservaciones");
+      setMyBookings([]);
+    } finally {
+      setBookingsLoading(false);
     }
   };
 
@@ -125,24 +172,47 @@ export default function App() {
     }
   };
 
+  const loadChat = async (exp: ActividadConProveedor) => {
+    if (!session.token) return;
+    const otherId = exp.provider_id || 1;
+    try {
+      const data = await apiFetch<any>(`/api/social/chat/history/${exp.id}/${otherId}`);
+      setChatHistory(Array.isArray(data) ? data : data.messages || []);
+    } catch {
+      setChatHistory([]);
+    }
+  };
+
   useEffect(() => {
     loadCatalog();
   }, []);
 
   useEffect(() => {
+    if (session.token) {
+      loadMyBookings();
+    } else {
+      setMyBookings([]);
+    }
+  }, [session.token]);
+
+  useEffect(() => {
     if (detailExp) {
+      setDetailTab("reviews");
       setReviewMsg(null);
       setReviewComment("");
       setReviewPhotos(null);
+      setChatError("");
       loadReviews(detailExp.id);
+      if (session.token) {
+        loadMyBookings();
+        loadChat(detailExp);
+      }
     }
   }, [detailExp]);
 
   useEffect(() => {
     if (view === "reservas" && session.token) {
-      apiFetch<any[]>("/api/bookings/reservations/my-bookings")
-        .then(setMyBookings)
-        .catch(() => setMyBookings([]));
+      loadMyBookings();
     }
     if (view === "admin-bi") {
       setBiError("");
@@ -173,7 +243,7 @@ export default function App() {
         body: fd,
       });
 
-      setReviewMsg({ type: "ok", text: "¡Reseña verificada publicada en MongoDB / RustFS!" });
+      setReviewMsg({ type: "ok", text: "¡Reseña verificada publicada con éxito!" });
       setReviewComment("");
       setReviewPhotos(null);
       await loadReviews(detailExp.id);
@@ -184,7 +254,31 @@ export default function App() {
     }
   };
 
-  const handleOpenCheckout = (actividad: ActividadItem) => {
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailExp || !chatText.trim()) return;
+    setChatSending(true);
+    setChatError("");
+    const recipientId = detailExp.provider_id || 1;
+    try {
+      await apiFetch("/api/social/chat/send", {
+        method: "POST",
+        body: JSON.stringify({
+          experienceId: detailExp.id,
+          recipientId,
+          content: chatText.trim(),
+        }),
+      });
+      setChatText("");
+      await loadChat(detailExp);
+    } catch (err: any) {
+      setChatError(err.message);
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  const handleOpenCheckout = (actividad: ActividadConProveedor) => {
     if (!session.token) {
       setAuthNotice("Inicia sesión para reservar experiencias sustentables.");
       setView("auth");
@@ -228,6 +322,7 @@ export default function App() {
         guests,
         total: checkoutExp.price * guests + 50,
       });
+      await loadMyBookings();
     } catch (err: any) {
       setBookingError(err.message);
     } finally {
@@ -271,6 +366,26 @@ export default function App() {
   });
 
   const isTourist = session.role?.toUpperCase() === "TOURIST";
+  const currentUserId = getUserIdFromToken(session.token);
+
+  // Reglas de elegibilidad para reseñar la experiencia abierta en detalle
+  const hasVisitedExperience = detailExp
+    ? myBookings.some(
+        (b) =>
+          Number(b.experience_id) === Number(detailExp.id) &&
+          ["CONFIRMED", "PAID", "COMPLETED"].includes(String(b.status).toUpperCase())
+      )
+    : false;
+
+  const hasAlreadyReviewed =
+    currentUserId !== null &&
+    reviewsData.reviews.some((rev: any) => Number(rev.touristId) === currentUserId);
+
+  const categoryBreakdown = experiences.reduce<Record<string, number>>((acc, item) => {
+    const key = item.category || "Ecoturismo";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground transition-colors duration-300">
@@ -311,17 +426,23 @@ export default function App() {
             />
 
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-              {["Todas", "Naturaleza", "Cultura", "Relax", "Gastronomía"].map((cat) => (
+              {[
+                { value: "Todas", label: "Todas" },
+                { value: "Naturaleza", label: "Naturaleza" },
+                { value: "Cultura", label: "Cultura" },
+                { value: "Viajes Tranquilos", label: "Relax" },
+                { value: "Gastronomia", label: "Gastronomía" },
+              ].map((cat) => (
                 <button
-                  key={cat}
-                  onClick={() => setCategoryFilter(cat)}
+                  key={cat.value}
+                  onClick={() => setCategoryFilter(cat.value)}
                   className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition ${
-                    categoryFilter === cat
+                    categoryFilter === cat.value
                       ? "bg-[#728C69] text-white"
                       : "bg-[#F2EFE9] dark:bg-[#18201C] hover:bg-[#E3E5D8]"
                   }`}
                 >
-                  {cat}
+                  {cat.label}
                 </button>
               ))}
               <button
@@ -398,11 +519,28 @@ export default function App() {
       {/* VISTA 5: MIS RESERVAS */}
       {view === "reservas" && (
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-10">
-          <h1 className="font-serif text-3xl mb-6">Mis Reservaciones Ecológicas</h1>
-          {myBookings.length === 0 ? (
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="font-serif text-3xl">Mis Reservaciones Ecológicas</h1>
+            <button
+              onClick={loadMyBookings}
+              className="text-xs bg-[#E3E5D8] dark:bg-[#2A312C] px-4 py-2 rounded-full font-medium hover:bg-[#728C69] hover:text-white transition"
+            >
+              Actualizar
+            </button>
+          </div>
+
+          {bookingsError && (
+            <div className="bg-red-50 text-red-700 border border-red-200 rounded-2xl p-4 text-xs mb-6">
+              {bookingsError}
+            </div>
+          )}
+
+          {bookingsLoading ? (
+            <p className="text-sm text-muted-foreground">Cargando tus reservaciones...</p>
+          ) : myBookings.length === 0 ? (
             <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 text-center">
               <p className="text-sm text-muted-foreground mb-4">
-                Aún no tienes reservaciones registradas.
+                Aún no tienes reservaciones registradas con esta cuenta ({session.name || "Invitado"}).
               </p>
               <button
                 onClick={() => setView("busqueda")}
@@ -413,27 +551,30 @@ export default function App() {
             </div>
           ) : (
             <div className="space-y-4">
-              {myBookings.map((b) => (
-                <div
-                  key={b.id}
-                  className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                >
-                  <div>
-                    <span className="text-xs font-mono bg-[#EBE9E0] dark:bg-[#18201C] text-[#3B523E] dark:text-[#A5B29A] px-3 py-1 rounded-full">
-                      Código de Acceso: {b.access_code || `TS-${b.id}`}
+              {myBookings.map((b) => {
+                const expInfo = experiences.find((e) => Number(e.id) === Number(b.experience_id));
+                return (
+                  <div
+                    key={b.id}
+                    className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <span className="text-xs font-mono bg-[#EBE9E0] dark:bg-[#18201C] text-[#3B523E] dark:text-[#A5B29A] px-3 py-1 rounded-full">
+                        Código de Acceso: {b.access_code || `TS-${b.id}`}
+                      </span>
+                      <h3 className="font-serif text-xl mt-2">
+                        {expInfo ? expInfo.title : `Experiencia #${b.experience_id}`} · {b.activity_date}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {b.guests_count} visitantes · Total pagado: ${b.total_amount} MXN
+                      </p>
+                    </div>
+                    <span className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 self-start sm:self-center">
+                      {b.status}
                     </span>
-                    <h3 className="font-serif text-xl mt-2">
-                      Experiencia #{b.experience_id} · {b.activity_date}
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {b.guests_count} visitantes · Total pagado: ${b.total_amount} MXN
-                    </p>
                   </div>
-                  <span className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 self-start sm:self-center">
-                    {b.status}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </main>
@@ -478,45 +619,110 @@ export default function App() {
       )}
 
       {/* VISTA 7: ADMIN - AUDITORÍAS */}
-      {view === "admin-auditorias" && <AdminAuditsPortal />}
-
-      {/* VISTA 8: ADMIN - PANEL BI */}
+      {view === "admin-auditorias" && <AdminAuditsPortal onCatalogUpdated={loadCatalog} />}
+      {/* VISTA 8: ADMIN - PANEL BI COMPLETO */}
       {view === "admin-bi" && (
-        <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-10">
-          <h1 className="font-serif text-3xl mb-2">Panel BI e Impacto Ambiental</h1>
-          <p className="text-sm text-muted-foreground mb-6">
-            Métricas consolidadas mediante eventos asíncronos en RabbitMQ.
-          </p>
+        <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-10 space-y-8">
+          <div>
+            <h1 className="font-serif text-3xl mb-2">Panel BI e Impacto Ambiental</h1>
+            <p className="text-sm text-muted-foreground">
+              Métricas consolidadas mediante eventos asíncronos en RabbitMQ y catálogo PostGIS.
+            </p>
+          </div>
 
           {biError ? (
             <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 text-sm text-amber-700">
               Acceso restringido: {biError}. Inicia sesión con rol Administrador.
             </div>
           ) : biData?.kpis ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                <span className="text-xs text-muted-foreground">Reservas Totales</span>
-                <p className="font-serif text-4xl font-bold mt-2">{biData.kpis.total_bookings}</p>
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
+                  <span className="text-xs text-muted-foreground">Reservas Totales</span>
+                  <p className="font-serif text-4xl font-bold mt-2">{biData.kpis.total_bookings}</p>
+                </div>
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
+                  <span className="text-xs text-muted-foreground">Ingresos Generados</span>
+                  <p className="font-serif text-4xl font-bold text-[#3B523E] dark:text-[#A5B29A] mt-2">
+                    ${biData.kpis.total_revenue}
+                  </p>
+                </div>
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
+                  <span className="text-xs text-muted-foreground">Fondo Ecológico</span>
+                  <p className="font-serif text-4xl font-bold text-[#728C69] mt-2">
+                    ${biData.kpis.total_impact_fund}
+                  </p>
+                </div>
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
+                  <span className="text-xs text-muted-foreground">Turistas Movilizados</span>
+                  <p className="font-serif text-4xl font-bold text-[#C81D77] mt-2">
+                    {biData.kpis.total_tourists_mobilized}
+                  </p>
+                </div>
               </div>
-              <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                <span className="text-xs text-muted-foreground">Ingresos Generados</span>
-                <p className="font-serif text-4xl font-bold text-[#3B523E] dark:text-[#A5B29A] mt-2">
-                  ${biData.kpis.total_revenue}
-                </p>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm">
+                  <div className="flex items-center gap-2 mb-4">
+                    <BarChart3 className="w-5 h-5 text-[#728C69]" />
+                    <h2 className="font-serif text-xl">Oferta Verificada por Categoría</h2>
+                  </div>
+                  <div className="space-y-4">
+                    {Object.entries(categoryBreakdown).map(([cat, count]) => {
+                      const pct = Math.min(100, Math.round((count / Math.max(1, experiences.length)) * 100));
+                      return (
+                        <div key={cat} className="space-y-1.5">
+                          <div className="flex justify-between text-xs font-medium">
+                            <span>{cat}</span>
+                            <span>
+                              {count} experiencia{count === 1 ? "" : "s"} ({pct}%)
+                            </span>
+                          </div>
+                          <div className="w-full h-2.5 bg-[#F2EFE9] dark:bg-[#18201C] rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-[#728C69] rounded-full transition-all duration-500"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <span className="text-xs font-bold uppercase text-[#C81D77]">
+                      Impacto Regenerativo CDMX
+                    </span>
+                    <h2 className="font-serif text-xl mt-1 mb-3">
+                      Distribución del Fondo de Conservación
+                    </h2>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Cada reservación aporta $50 MXN directos a proyectos de conservación de suelo de conservación, reforestación y saneamiento de canales en la Ciudad de México.
+                    </p>
+                  </div>
+                  <div className="mt-6 p-4 rounded-2xl bg-[#F2EFE9] dark:bg-[#18201C] flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-muted-foreground block">
+                        Promedio de aporte por turista
+                      </span>
+                      <span className="font-serif text-2xl font-bold text-[#728C69]">
+                        $
+                        {biData.kpis.total_tourists_mobilized > 0
+                          ? (
+                              biData.kpis.total_impact_fund /
+                              biData.kpis.total_tourists_mobilized
+                            ).toFixed(2)
+                          : "0.00"}{" "}
+                        MXN
+                      </span>
+                    </div>
+                    <Leaf className="w-8 h-8 text-[#728C69]" />
+                  </div>
+                </div>
               </div>
-              <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                <span className="text-xs text-muted-foreground">Fondo Ecológico</span>
-                <p className="font-serif text-4xl font-bold text-[#728C69] mt-2">
-                  ${biData.kpis.total_impact_fund}
-                </p>
-              </div>
-              <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                <span className="text-xs text-muted-foreground">Turistas Movilizados</span>
-                <p className="font-serif text-4xl font-bold text-[#C81D77] mt-2">
-                  {biData.kpis.total_tourists_mobilized}
-                </p>
-              </div>
-            </div>
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">Cargando métricas analíticas...</p>
           )}
@@ -550,7 +756,7 @@ export default function App() {
         </main>
       )}
 
-      {/* MODAL DETALLE DE ACTIVIDAD + RESEÑAS VERIFICADAS (SOCIAL-SERVICE) */}
+      {/* MODAL DETALLE DE ACTIVIDAD + RESEÑAS VERIFICADAS + CHAT DIRECTO */}
       {detailExp && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-2xl w-full p-6 sm:p-8 shadow-xl relative my-8 max-h-[90vh] overflow-y-auto">
@@ -607,130 +813,231 @@ export default function App() {
               </button>
             </div>
 
-            {/* SECCIÓN DE RESEÑAS VERIFICADAS CONTRA GREENWASHING */}
-            <div className="mt-6 space-y-5">
-              <div className="flex items-center justify-between">
-                <h3 className="font-serif text-xl">
-                  Reseñas y Evidencias Reales ({reviewsData.total_reviews})
-                </h3>
-              </div>
+            {/* PESTAÑAS SOCIALES */}
+            <div className="flex gap-2 mt-5 mb-4">
+              <button
+                onClick={() => setDetailTab("reviews")}
+                className={`px-4 py-2 rounded-full text-xs font-semibold transition ${
+                  detailTab === "reviews"
+                    ? "bg-[#728C69] text-white"
+                    : "bg-[#F2EFE9] dark:bg-[#18201C]"
+                }`}
+              >
+                Reseñas Verificadas ({reviewsData.total_reviews})
+              </button>
+              <button
+                onClick={() => setDetailTab("chat")}
+                className={`px-4 py-2 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${
+                  detailTab === "chat"
+                    ? "bg-[#728C69] text-white"
+                    : "bg-[#F2EFE9] dark:bg-[#18201C]"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Contactar Cooperativa
+              </button>
+            </div>
 
-              {session.token && isTourist && (
-                <form
-                  onSubmit={handleSubmitReview}
-                  className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl space-y-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-bold">Comparte tu experiencia verificada</span>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          onClick={() => setReviewRating(star)}
-                          className="p-0.5"
-                        >
-                          <Star
-                            className={`w-4 h-4 ${
-                              star <= reviewRating
-                                ? "fill-amber-500 text-amber-500"
-                                : "text-gray-400"
-                            }`}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <textarea
-                    required
-                    rows={2}
-                    placeholder="¿Cómo fue la experiencia y el cuidado ambiental del lugar?"
-                    value={reviewComment}
-                    onChange={(e) => setReviewComment(e.target.value)}
-                    className="w-full bg-white dark:bg-[#2A312C] rounded-xl p-3 text-xs"
-                  />
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={reviewEcoVerified}
-                        onChange={(e) => setReviewEcoVerified(e.target.checked)}
-                      />
-                      <span>Confirmo cumplimiento ecológico real</span>
-                    </label>
-
-                    <label className="inline-flex items-center gap-1.5 cursor-pointer text-[#728C69] font-medium">
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>
-                        {reviewPhotos?.length
-                          ? `${reviewPhotos.length} foto(s) lista(s)`
-                          : "Adjuntar fotos"}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={(e) => setReviewPhotos(e.target.files)}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
-                  {reviewMsg && (
-                    <p
-                      className={`text-xs ${
-                        reviewMsg.type === "ok" ? "text-green-700" : "text-red-600"
-                      }`}
-                    >
-                      {reviewMsg.text}
-                    </p>
-                  )}
-
-                  <button
-                    disabled={reviewSubmitting}
-                    type="submit"
-                    className="bg-[#728C69] hover:bg-[#5B7153] text-white text-xs font-semibold px-4 py-2 rounded-xl"
-                  >
-                    {reviewSubmitting ? "Publicando..." : "Publicar reseña"}
-                  </button>
-                </form>
-              )}
-
-              {reviewsData.reviews.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Aún no hay reseñas para esta experiencia. ¡Sé el primero en compartir tu visita!
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {reviewsData.reviews.map((rev: any) => (
-                    <div
-                      key={rev._id}
-                      className="p-4 rounded-2xl bg-[#F2EFE9]/70 dark:bg-[#18201C]/70 space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold">Turista #{rev.touristId}</span>
-                          {rev.ecologicalComplianceVerified && (
-                            <span className="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-semibold">
-                              Cumplimiento ecológico verificado
-                            </span>
-                          )}
-                        </div>
-                        <span className="font-bold text-amber-600">★ {rev.rating}/5</span>
+            {detailTab === "reviews" ? (
+              <div className="space-y-5">
+                {session.token && isTourist && (
+                  <>
+                    {hasAlreadyReviewed ? (
+                      <div className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl text-xs flex items-center gap-2.5 text-[#3B523E] dark:text-[#A5B29A]">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-[#728C69]" />
+                        <span>
+                          Ya publicaste tu reseña verificada para esta experiencia (límite de 1 reseña por visitante).
+                        </span>
                       </div>
-                      <p className="text-xs text-foreground">{rev.comment}</p>
-                      {Array.isArray(rev.photoKeys) && rev.photoKeys.length > 0 && (
-                        <p className="text-[10px] text-[#728C69] font-medium">
-                          {rev.photoKeys.length} fotografía(s) probatoria(s) en RustFS/S3
+                    ) : !hasVisitedExperience ? (
+                      <div className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl text-xs flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 text-muted-foreground">
+                          <Lock className="w-4 h-4 shrink-0 text-[#C81D77]" />
+                          <span>
+                            Para evitar reseñas falsas, debes reservar y visitar esta experiencia antes de calificarla.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const chosen = detailExp;
+                            setDetailExp(null);
+                            handleOpenCheckout(chosen);
+                          }}
+                          className="shrink-0 bg-[#728C69] text-white px-3 py-1.5 rounded-xl font-semibold"
+                        >
+                          Reservar
+                        </button>
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={handleSubmitReview}
+                        className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl space-y-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-bold">Comparte tu experiencia verificada</span>
+                          <div className="flex items-center gap-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                type="button"
+                                onClick={() => setReviewRating(star)}
+                                className="p-0.5"
+                              >
+                                <Star
+                                  className={`w-4 h-4 ${
+                                    star <= reviewRating
+                                      ? "fill-amber-500 text-amber-500"
+                                      : "text-gray-400"
+                                  }`}
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <textarea
+                          required
+                          rows={2}
+                          placeholder="¿Cómo fue la experiencia y el cuidado ambiental del lugar?"
+                          value={reviewComment}
+                          onChange={(e) => setReviewComment(e.target.value)}
+                          className="w-full bg-white dark:bg-[#2A312C] rounded-xl p-3 text-xs"
+                        />
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={reviewEcoVerified}
+                              onChange={(e) => setReviewEcoVerified(e.target.checked)}
+                            />
+                            <span>Confirmo cumplimiento ecológico real</span>
+                          </label>
+
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[#728C69] font-medium">
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>
+                              {reviewPhotos?.length
+                                ? `${reviewPhotos.length} foto(s) lista(s)`
+                                : "Adjuntar fotos"}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={(e) => setReviewPhotos(e.target.files)}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        {reviewMsg && (
+                          <p
+                            className={`text-xs ${
+                              reviewMsg.type === "ok" ? "text-green-700" : "text-red-600"
+                            }`}
+                          >
+                            {reviewMsg.text}
+                          </p>
+                        )}
+
+                        <button
+                          disabled={reviewSubmitting}
+                          type="submit"
+                          className="bg-[#728C69] hover:bg-[#5B7153] text-white text-xs font-semibold px-4 py-2 rounded-xl"
+                        >
+                          {reviewSubmitting ? "Publicando..." : "Publicar reseña"}
+                        </button>
+                      </form>
+                    )}
+                  </>
+                )}
+
+                {reviewsData.reviews.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Aún no hay reseñas para esta experiencia. ¡Sé el primero en compartir tu visita!
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {reviewsData.reviews.map((rev: any) => (
+                      <div
+                        key={rev._id}
+                        className="p-4 rounded-2xl bg-[#F2EFE9]/70 dark:bg-[#18201C]/70 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">Turista #{rev.touristId}</span>
+                            {rev.ecologicalComplianceVerified && (
+                              <span className="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-semibold">
+                                Cumplimiento ecológico verificado
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-bold text-amber-600">★ {rev.rating}/5</span>
+                        </div>
+                        <p className="text-xs text-foreground">{rev.comment}</p>
+                        {Array.isArray(rev.photoKeys) && rev.photoKeys.length > 0 && (
+                          <p className="text-[10px] text-[#728C69] font-medium">
+                            {rev.photoKeys.length} fotografía(s) probatoria(s) en RustFS/S3
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {!session.token ? (
+                  <p className="text-xs text-muted-foreground">
+                    Inicia sesión como turista para enviar consultas directas a la cooperativa.
+                  </p>
+                ) : (
+                  <>
+                    <div className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-2xl p-4 max-h-48 overflow-y-auto space-y-2">
+                      {chatHistory.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Inicia una conversación con la cooperativa sobre horarios, accesibilidad o transporte público.
                         </p>
+                      ) : (
+                        chatHistory.map((m: any, idx: number) => (
+                          <div
+                            key={m._id || idx}
+                            className="bg-white dark:bg-[#2A312C] rounded-xl p-2.5 text-xs"
+                          >
+                            <span className="font-bold text-[#728C69] block mb-0.5">
+                              {m.senderRole === "PROVIDER" ? "Cooperativa" : `Turista #${m.senderId}`}
+                            </span>
+                            <span>{m.content}</span>
+                          </div>
+                        ))
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+
+                    {chatError && <p className="text-xs text-red-600">{chatError}</p>}
+
+                    <form onSubmit={handleSendChat} className="flex gap-2">
+                      <input
+                        required
+                        value={chatText}
+                        onChange={(e) => setChatText(e.target.value)}
+                        placeholder="Escribe tu consulta para la cooperativa..."
+                        className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-3 h-10 text-xs"
+                      />
+                      <button
+                        disabled={chatSending}
+                        type="submit"
+                        className="bg-[#C81D77] text-white px-4 rounded-xl text-xs font-medium flex items-center gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Enviar
+                      </button>
+                    </form>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -14,7 +14,6 @@ def publish_experience(
     payload: dict = Depends(verify_jwt_token),
     db: Session = Depends(get_db)
 ):
-    # Publicar nueva experiencia turistica tras validar rol de proveedor
     if payload.get("role") != "PROVIDER":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo proveedores pueden publicar experiencias")
     return create_experience(db, int(payload["sub"]), data)
@@ -29,5 +28,4 @@ def list_experiences(
     accessible: bool | None = None,
     db: Session = Depends(get_db)
 ):
-    # Consultar catalogo publico con filtros sustentables y de accesibilidad
     return search_experiences(db, q, category, borough, pet_friendly, accessible)
