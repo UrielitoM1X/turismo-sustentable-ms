@@ -13,7 +13,6 @@ import {
   Camera,
   MessageSquare,
   Send,
-  BarChart3,
   Lock,
 } from "lucide-react";
 import Header, { RouteView } from "./components/Header";
@@ -22,6 +21,9 @@ import TarjetaActividad, { ActividadItem } from "./components/TarjetaActividad";
 import AuthViews from "./components/AuthViews";
 import { ProviderPortal, AdminAuditsPortal } from "./components/RoleDashboards";
 import PerfilPortal from "./components/PerfilPortal";
+import AdminBiDashboard from "./components/AdminBiDashboard";
+import { useLanguage } from "./i18n/LanguageContext";
+import { translations } from "./i18n/translations";
 import {
   apiFetch,
   decodeJwtPayload,
@@ -49,12 +51,12 @@ function getLocalDateString(offsetDays = 0): string {
 }
 
 export default function App() {
+  const { lang, t, formatCategory, formatStatus } = useLanguage();
   const [view, setView] = useState<RouteView>("home");
-  const [lang, setLang] = useState<"es" | "en">("es");
   const [session, setSession] = useState(getUserSession());
   const [authNotice, setAuthNotice] = useState("");
 
-  // Catálogo y filtros
+  // Catalog & filters
   const [experiences, setExperiences] = useState<ActividadConProveedor[]>([]);
   const [searchText, setSearchText] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todas");
@@ -65,7 +67,7 @@ export default function App() {
   const currentUserId = session.userId ?? getUserIdFromToken(session.token);
   const canReserve = !session.token || isTourist;
 
-  // Favoritos persistentes por usuario (sincronizados con booking-payment para TOURIST)
+  // Persistent favorites per user
   const favKey = `ts_favs_${currentUserId ?? session.name ?? "guest"}`;
   const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
     try {
@@ -118,12 +120,12 @@ export default function App() {
           localStorage.setItem(favKey, JSON.stringify(ids));
         }
       } catch {
-        // Fallback local ya aplicado
+        // Local fallback already applied
       }
     }
   };
 
-  // Detalle, Reseñas y Chat Directo (social-service)
+  // Detail, Reviews & Direct Chat (social-service)
   const [detailExp, setDetailExp] = useState<ActividadConProveedor | null>(null);
   const [detailTab, setDetailTab] = useState<"reviews" | "chat">("reviews");
   const [reviewsData, setReviewsData] = useState<{
@@ -139,7 +141,7 @@ export default function App() {
   const [reviewMsg, setReviewMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
-  // Estado del Chat con la cooperativa
+  // Chat state with cooperative
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [chatText, setChatText] = useState("");
   const [chatSending, setChatSending] = useState(false);
@@ -156,20 +158,26 @@ export default function App() {
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const [pendingImpact, setPendingImpact] = useState<number | null>(null);
 
-  // Mis Reservas (también se usa para validar elegibilidad de reseña)
+  // My Bookings
   const [myBookings, setMyBookings] = useState<any[]>([]);
 
-  // Guía IA
-  const [aiMessage, setAiMessage] = useState(
-    "Busco algo de naturaleza y accesible para ir con mi perro"
-  );
+  // AI Guide
+  const [aiMessage, setAiMessage] = useState(() => t("ai.defaultPrompt"));
   const [aiReply, setAiReply] = useState("");
   const [aiSuggestions, setAiSuggestions] = useState<ActividadConProveedor[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
 
-  // Panel BI (Admin)
-  const [biData, setBiData] = useState<any>(null);
-  const [biError, setBiError] = useState("");
+  useEffect(() => {
+    setAiMessage((prev) => {
+      if (
+        prev === translations.es["ai.defaultPrompt"] ||
+        prev === translations.en["ai.defaultPrompt"]
+      ) {
+        return translations[lang]["ai.defaultPrompt"];
+      }
+      return prev;
+    });
+  }, [lang]);
 
   const loadCatalog = async () => {
     try {
@@ -184,7 +192,7 @@ export default function App() {
   const [bookingsLoading, setBookingsLoading] = useState(false);
 
   const loadMyBookings = async () => {
-    if (!session.token) {
+    if (!session.token || !isTourist) {
       setMyBookings([]);
       return;
     }
@@ -194,7 +202,7 @@ export default function App() {
       const list = await apiFetch<any[]>("/api/bookings/reservations/my-bookings");
       setMyBookings(Array.isArray(list) ? list : []);
     } catch (err: any) {
-      setBookingsError(err.message || "Error al cargar reservaciones");
+      setBookingsError(err.message || t("bookings.loadError"));
       setMyBookings([]);
     } finally {
       setBookingsLoading(false);
@@ -230,12 +238,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (session.token) {
+    if (session.token && isTourist) {
       loadMyBookings();
     } else {
       setMyBookings([]);
     }
-  }, [session.token]);
+  }, [session.token, isTourist]);
 
   useEffect(() => {
     setChatHistory([]);
@@ -250,26 +258,18 @@ export default function App() {
       }
       setChatError("");
       loadReviews(detailExp.id);
-      if (session.token) {
+      if (session.token && isTourist) {
         loadMyBookings();
-        if (isTourist) {
-          loadChat(detailExp);
-        }
+        loadChat(detailExp);
       }
     }
   }, [detailExp]);
 
   useEffect(() => {
-    if (view === "reservas" && session.token) {
+    if (view === "reservas" && session.token && isTourist) {
       loadMyBookings();
     }
-    if (view === "admin-bi") {
-      setBiError("");
-      apiFetch<any>("/api/bi/dashboard/summary")
-        .then(setBiData)
-        .catch((err) => setBiError(err.message));
-    }
-  }, [view, session.token]);
+  }, [view, session.token, isTourist]);
 
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,7 +292,7 @@ export default function App() {
         body: fd,
       });
 
-      setReviewMsg({ type: "ok", text: "¡Reseña verificada publicada con éxito!" });
+      setReviewMsg({ type: "ok", text: t("detail.reviewSuccess") });
       setReviewComment("");
       setReviewPhotos(null);
       if (reviewPhotosInputRef.current) {
@@ -332,7 +332,7 @@ export default function App() {
 
   const handleOpenCheckout = (actividad: ActividadConProveedor) => {
     if (!session.token) {
-      setAuthNotice("Inicia sesión para reservar experiencias sustentables.");
+      setAuthNotice(t("checkout.loginRequired"));
       setView("auth");
       return;
     }
@@ -358,7 +358,7 @@ export default function App() {
         });
         await loadMyBookings();
       } catch {
-        // Si ya expiró o falló la cancelación, cerramos el modal igualmente
+        // Close modal anyway if already expired
       }
     }
     setPendingBookingId(null);
@@ -435,7 +435,7 @@ export default function App() {
     e.preventDefault();
     const trimmed = aiMessage.trim();
     if (trimmed.length < 2) {
-      setAiReply("Por favor escribe al menos 2 caracteres para buscar recomendaciones.");
+      setAiReply(t("ai.minChars"));
       setAiSuggestions([]);
       return;
     }
@@ -460,8 +460,6 @@ export default function App() {
   const handleLogout = () => {
     clearUserSession();
     setSession(getUserSession());
-    setBiData(null);
-    setBiError("");
     setChatHistory([]);
     setReviewsData({ average_rating: 0, total_reviews: 0, reviews: [] });
     setDetailExp(null);
@@ -489,7 +487,6 @@ export default function App() {
     return matchesSearch && matchesCategory && matchesPet && matchesAccess;
   });
 
-  // Reglas de elegibilidad para reseñar la experiencia abierta en detalle
   const hasVisitedExperience = detailExp
     ? myBookings.some(
         (b) =>
@@ -502,12 +499,6 @@ export default function App() {
     currentUserId !== null &&
     reviewsData.reviews.some((rev: any) => Number(rev.touristId) === currentUserId);
 
-  const categoryBreakdown = experiences.reduce<Record<string, number>>((acc, item) => {
-    const key = item.category || "Ecoturismo";
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground transition-colors duration-300">
       <Header
@@ -518,29 +509,25 @@ export default function App() {
         }}
         session={session}
         onLogout={handleLogout}
-        lang={lang}
-        onToggleLang={() => setLang(lang === "es" ? "en" : "es")}
       />
 
-      {/* VISTA 1: HOME DINÁMICO POR ROL */}
+      {/* VIEW 1: ROLE-BASED HOME */}
       {view === "home" && <HomePage session={session} onNavigate={setView} />}
 
-      {/* VISTA 2: EXPLORAR CATÁLOGO */}
+      {/* VIEW 2: EXPLORE CATALOG */}
       {view === "busqueda" && (
         <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="mb-8">
             <span className="text-xs font-bold tracking-[0.2em] text-[#728C69] uppercase">
-              Catálogo Verificado · Ciudad de México
+              {t("catalog.badge")}
             </span>
-            <h1 className="font-serif text-3xl sm:text-4xl mt-1">
-              Explora experiencias sustentables
-            </h1>
+            <h1 className="font-serif text-3xl sm:text-4xl mt-1">{t("catalog.title")}</h1>
           </div>
 
           <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-4 sm:p-5 shadow-sm mb-8 flex flex-col md:flex-row gap-4 items-center justify-between">
             <input
               type="text"
-              placeholder="Buscar por actividad o alcaldía (ej. Xochimilco)..."
+              placeholder={t("catalog.searchPlaceholder")}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               className="w-full md:w-80 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 text-sm focus:outline-none focus:ring-2 focus:ring-[#728C69]"
@@ -548,11 +535,11 @@ export default function App() {
 
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
               {[
-                { value: "Todas", label: "Todas" },
-                { value: "Naturaleza", label: "Naturaleza" },
-                { value: "Cultura", label: "Cultura" },
-                { value: "Viajes Tranquilos", label: "Relax" },
-                { value: "Gastronomia", label: "Gastronomía" },
+                { value: "Todas", label: t("catalog.catAll") },
+                { value: "Naturaleza", label: t("catalog.catNature") },
+                { value: "Cultura", label: t("catalog.catCulture") },
+                { value: "Viajes Tranquilos", label: t("catalog.catRelax") },
+                { value: "Gastronomia", label: t("catalog.catGastronomy") },
               ].map((cat) => (
                 <button
                   key={cat.value}
@@ -574,7 +561,7 @@ export default function App() {
                     : "bg-[#F2EFE9] dark:bg-[#18201C]"
                 }`}
               >
-                Pet Friendly
+                {t("common.petFriendly")}
               </button>
               <button
                 onClick={() => setOnlyAccessible(!onlyAccessible)}
@@ -584,16 +571,14 @@ export default function App() {
                     : "bg-[#F2EFE9] dark:bg-[#18201C]"
                 }`}
               >
-                Accesible
+                {t("common.accessible")}
               </button>
             </div>
           </div>
 
           {filteredExperiences.length === 0 ? (
             <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-10 text-center">
-              <p className="text-sm text-muted-foreground">
-                No se encontraron experiencias con esos filtros.
-              </p>
+              <p className="text-sm text-muted-foreground">{t("catalog.empty")}</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -613,7 +598,7 @@ export default function App() {
         </main>
       )}
 
-      {/* VISTA 3: AUTH */}
+      {/* VIEW 3: AUTH */}
       {view === "auth" && (
         <AuthViews
           initialError={authNotice}
@@ -624,7 +609,7 @@ export default function App() {
         />
       )}
 
-      {/* VISTA 4: PERFIL Y FAVORITOS */}
+      {/* VIEW 4: PROFILE & FAVORITES */}
       {view === "perfil" && (
         <PerfilPortal
           session={session}
@@ -638,16 +623,16 @@ export default function App() {
         />
       )}
 
-      {/* VISTA 5: MIS RESERVAS */}
+      {/* VIEW 5: MY BOOKINGS */}
       {view === "reservas" && (
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-10">
           <div className="flex items-center justify-between mb-6">
-            <h1 className="font-serif text-3xl">Mis Reservaciones Ecológicas</h1>
+            <h1 className="font-serif text-3xl">{t("bookings.title")}</h1>
             <button
               onClick={loadMyBookings}
               className="text-xs bg-[#E3E5D8] dark:bg-[#2A312C] px-4 py-2 rounded-full font-medium hover:bg-[#728C69] hover:text-white transition"
             >
-              Actualizar
+              {t("common.refresh")}
             </button>
           </div>
 
@@ -658,17 +643,17 @@ export default function App() {
           )}
 
           {bookingsLoading ? (
-            <p className="text-sm text-muted-foreground">Cargando tus reservaciones...</p>
+            <p className="text-sm text-muted-foreground">{t("bookings.loading")}</p>
           ) : myBookings.length === 0 ? (
             <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 text-center">
               <p className="text-sm text-muted-foreground mb-4">
-                Aún no tienes reservaciones registradas con esta cuenta ({session.name || "Invitado"}).
+                {t("bookings.empty", { name: session.name || t("bookings.guest") })}
               </p>
               <button
                 onClick={() => setView("busqueda")}
                 className="bg-[#C81D77] text-white text-xs font-medium px-5 py-2.5 rounded-full"
               >
-                Explorar experiencias
+                {t("bookings.exploreCta")}
               </button>
             </div>
           ) : (
@@ -689,19 +674,23 @@ export default function App() {
                   >
                     <div>
                       <span className="text-xs font-mono bg-[#EBE9E0] dark:bg-[#18201C] text-[#3B523E] dark:text-[#A5B29A] px-3 py-1 rounded-full">
-                        Código de Acceso: {b.access_code || `TS-${b.id}`}
+                        {t("bookings.accessCode", { code: b.access_code || `TS-${b.id}` })}
                       </span>
                       <h3 className="font-serif text-xl mt-2">
-                        {expInfo ? expInfo.title : `Experiencia #${b.experience_id}`} · {b.activity_date}
+                        {expInfo ? expInfo.title : t("bookings.expTitle", { id: b.experience_id })} ·{" "}
+                        {b.activity_date}
                       </h3>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {b.guests_count} visitantes · Total: ${b.total_amount} MXN
+                        {t("bookings.summary", {
+                          guests: b.guests_count,
+                          total: b.total_amount,
+                        })}
                       </p>
                     </div>
                     <span
                       className={`px-3.5 py-1.5 rounded-full text-xs font-semibold self-start sm:self-center ${statusBadgeClass}`}
                     >
-                      {b.status}
+                      {formatStatus(b.status)}
                     </span>
                   </div>
                 );
@@ -711,24 +700,22 @@ export default function App() {
         </main>
       )}
 
-      {/* VISTA 6: GUÍA IA */}
+      {/* VIEW 6: AI GUIDE */}
       {view === "ia" && (
         <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-10">
           <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 shadow-sm">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#728C69]/15 text-[#728C69] text-xs font-bold uppercase mb-3">
-              <Sparkles className="w-4 h-4" /> Recomendador Inteligente CDMX
+              <Sparkles className="w-4 h-4" /> {t("ai.badge")}
             </div>
-            <h1 className="font-serif text-3xl mb-2">Asistente de Turismo Regenerativo</h1>
-            <p className="text-sm text-muted-foreground mb-6">
-              Cuéntanos qué buscas (alcaldía, accesibilidad, mascotas o intereses) y cruzaremos tu perfil con experiencias auditadas.
-            </p>
+            <h1 className="font-serif text-3xl mb-2">{t("ai.title")}</h1>
+            <p className="text-sm text-muted-foreground mb-6">{t("ai.subtitle")}</p>
 
             <form onSubmit={handleAskAi} className="flex flex-col sm:flex-row gap-3 mb-6">
               <input
                 required
                 value={aiMessage}
                 onChange={(e) => setAiMessage(e.target.value)}
-                placeholder="Ej. Busco algo tranquilo en Xochimilco con mi perro..."
+                placeholder={t("ai.placeholder")}
                 className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12 text-sm"
               />
               <button
@@ -736,7 +723,7 @@ export default function App() {
                 type="submit"
                 className="bg-[#C81D77] hover:bg-[#A91864] text-white rounded-xl px-6 h-12 text-sm font-medium transition"
               >
-                {aiLoading ? "Analizando..." : "Recomendar"}
+                {aiLoading ? t("ai.btnAnalyzing") : t("ai.btnRecommend")}
               </button>
             </form>
 
@@ -746,7 +733,7 @@ export default function App() {
                 {aiSuggestions.length > 0 && (
                   <div className="pt-3 border-t border-border">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-[#728C69] mb-3">
-                      Experiencias Sugeridas ({aiSuggestions.length})
+                      {t("ai.suggestionsTitle", { count: aiSuggestions.length })}
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {aiSuggestions.map((sug: any) => {
@@ -760,13 +747,13 @@ export default function App() {
                             className="text-left bg-white dark:bg-[#2A312C] rounded-2xl p-4 shadow-sm hover:border-[#728C69] border border-transparent transition-all"
                           >
                             <span className="text-[10px] font-bold uppercase text-[#728C69]">
-                              {fullExp.category} · {fullExp.borough_cdmx}
+                              {formatCategory(fullExp.category)} · {fullExp.borough_cdmx}
                             </span>
                             <h4 className="font-serif text-base font-bold mt-1 line-clamp-1">
                               {fullExp.title}
                             </h4>
                             <p className="text-xs text-muted-foreground mt-1">
-                              ${fullExp.price} MXN · Ver detalle →
+                              ${fullExp.price} {t("common.mxn")} · {t("ai.viewDetail")}
                             </p>
                           </button>
                         );
@@ -780,185 +767,23 @@ export default function App() {
         </main>
       )}
 
-      {/* VISTA 7: ADMIN - AUDITORÍAS */}
+      {/* VIEW 7: ADMIN - AUDITS */}
       {view === "admin-auditorias" && <AdminAuditsPortal onCatalogUpdated={loadCatalog} />}
-      {/* VISTA 8: ADMIN - PANEL BI COMPLETO */}
-      {view === "admin-bi" && (
-        <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-10 space-y-8">
-          <div>
-            <h1 className="font-serif text-3xl mb-2">Panel BI e Impacto Ambiental</h1>
-            <p className="text-sm text-muted-foreground">
-              Métricas consolidadas mediante eventos asíncronos en RabbitMQ y catálogo PostGIS.
-            </p>
-          </div>
 
-          {biError ? (
-            <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 text-sm text-amber-700">
-              Acceso restringido: {biError}. Inicia sesión con rol Administrador.
-            </div>
-          ) : biData?.kpis ? (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                  <span className="text-xs text-muted-foreground">Reservas Totales</span>
-                  <p className="font-serif text-4xl font-bold mt-2">{biData.kpis.total_bookings}</p>
-                </div>
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                  <span className="text-xs text-muted-foreground">Ingresos Generados</span>
-                  <p className="font-serif text-4xl font-bold text-[#3B523E] dark:text-[#A5B29A] mt-2">
-                    ${biData.kpis.total_revenue}
-                  </p>
-                </div>
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                  <span className="text-xs text-muted-foreground">Fondo Ecológico</span>
-                  <p className="font-serif text-4xl font-bold text-[#728C69] mt-2">
-                    ${biData.kpis.total_impact_fund}
-                  </p>
-                </div>
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                  <span className="text-xs text-muted-foreground">Turistas Movilizados</span>
-                  <p className="font-serif text-4xl font-bold text-[#C81D77] mt-2">
-                    {biData.kpis.total_tourists_mobilized}
-                  </p>
-                </div>
-              </div>
+      {/* VIEW 8: ADMIN - FULL BI & PLATFORM MONITORING */}
+      {view === "admin-bi" && <AdminBiDashboard experiences={experiences} />}
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm">
-                  <div className="flex items-center gap-2 mb-4">
-                    <BarChart3 className="w-5 h-5 text-[#728C69]" />
-                    <h2 className="font-serif text-xl">Desempeño por Categoría (BI)</h2>
-                  </div>
-                  <div className="space-y-4">
-                    {Array.isArray(biData.by_category) && biData.by_category.length > 0 ? (
-                      (() => {
-                        const maxBookings = Math.max(
-                          1,
-                          ...biData.by_category.map((c: any) => Number(c.bookings || c.count || 0))
-                        );
-                        return biData.by_category.map((item: any, idx: number) => {
-                          const cat = item.category || "Ecoturismo";
-                          const count = Number(item.bookings ?? item.count ?? 0);
-                          const revenue = item.revenue !== undefined ? Number(item.revenue) : null;
-                          const pct = Math.min(100, Math.round((count / maxBookings) * 100));
-                          return (
-                            <div key={`${cat}-${idx}`} className="space-y-1.5">
-                              <div className="flex justify-between text-xs font-medium">
-                                <span>{cat}</span>
-                                <span>
-                                  {count} reserva{count === 1 ? "" : "s"}
-                                  {revenue !== null ? ` · $${revenue.toFixed(2)} MXN` : ""}
-                                </span>
-                              </div>
-                              <div className="w-full h-2.5 bg-[#F2EFE9] dark:bg-[#18201C] rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-[#728C69] rounded-full transition-all duration-500"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()
-                    ) : (
-                      Object.entries(categoryBreakdown).map(([cat, count]) => {
-                        const pct = Math.min(
-                          100,
-                          Math.round((count / Math.max(1, experiences.length)) * 100)
-                        );
-                        return (
-                          <div key={cat} className="space-y-1.5">
-                            <div className="flex justify-between text-xs font-medium">
-                              <span>{cat}</span>
-                              <span>
-                                {count} experiencia{count === 1 ? "" : "s"} ({pct}%)
-                              </span>
-                            </div>
-                            <div className="w-full h-2.5 bg-[#F2EFE9] dark:bg-[#18201C] rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-[#728C69] rounded-full transition-all duration-500"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col justify-between space-y-6">
-                  <div>
-                    <span className="text-xs font-bold uppercase text-[#C81D77]">
-                      Impacto Regenerativo CDMX
-                    </span>
-                    <h2 className="font-serif text-xl mt-1 mb-3">
-                      Distribución del Fondo de Conservación
-                    </h2>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Cada reservación aporta un 5% directo a proyectos de conservación de suelo de conservación, reforestación y saneamiento de canales en la Ciudad de México.
-                    </p>
-                  </div>
-
-                  {Array.isArray(biData.top_providers) && biData.top_providers.length > 0 && (
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#728C69] mb-2">
-                        Top Proveedores Sustentables
-                      </h3>
-                      <div className="space-y-2">
-                        {biData.top_providers.map((prov: any, idx: number) => (
-                          <div
-                            key={prov.provider_id ?? idx}
-                            className="flex items-center justify-between text-xs bg-[#F2EFE9] dark:bg-[#18201C] px-3 py-2 rounded-xl"
-                          >
-                            <span className="font-semibold">
-                              {prov.provider_name || `Proveedor #${prov.provider_id}`}
-                            </span>
-                            <span className="text-muted-foreground">
-                              {prov.bookings ?? prov.total_bookings ?? 0} reservas · $
-                              {Number(prov.revenue ?? prov.total_revenue ?? 0).toFixed(2)} MXN
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="p-4 rounded-2xl bg-[#F2EFE9] dark:bg-[#18201C] flex items-center justify-between">
-                    <div>
-                      <span className="text-xs text-muted-foreground block">
-                        Promedio de aporte por turista
-                      </span>
-                      <span className="font-serif text-2xl font-bold text-[#728C69]">
-                        $
-                        {biData.kpis.total_tourists_mobilized > 0
-                          ? (
-                              biData.kpis.total_impact_fund /
-                              biData.kpis.total_tourists_mobilized
-                            ).toFixed(2)
-                          : "0.00"}{" "}
-                        MXN
-                      </span>
-                    </div>
-                    <Leaf className="w-8 h-8 text-[#728C69]" />
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">Cargando métricas analíticas...</p>
-          )}
-        </main>
-      )}
-
-      {/* VISTA 9: PROVEEDOR - PORTAL COMPLETO */}
+      {/* VIEW 9: PROVIDER PORTAL */}
       {(view === "negocio-documentos" ||
         view === "negocio-dashboard" ||
+        view === "negocio-monitoreo" ||
         view === "negocio-nueva") && (
         <ProviderPortal
           session={session}
           initialTab={
-            view === "negocio-documentos"
+            view === "negocio-monitoreo"
+              ? "monitoreo"
+              : view === "negocio-documentos"
               ? "evidencias"
               : view === "negocio-nueva"
               ? "nuevaExp"
@@ -969,24 +794,20 @@ export default function App() {
         />
       )}
 
-      {/* VISTA 10: ACERCA DE NOSOTROS */}
+      {/* VIEW 10: ABOUT */}
       {view === "about" && (
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
           <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] p-8 sm:p-12 shadow-sm space-y-6">
             <span className="text-xs font-bold tracking-[0.2em] text-[#728C69] uppercase">
-              Nuestra Misión
+              {t("about.badge")}
             </span>
-            <h1 className="font-serif text-3xl sm:text-4xl">
-              Turismo regenerativo y verificación real contra el greenwashing
-            </h1>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Conectamos a viajeros conscientes con cooperativas locales de la Ciudad de México mediante auditorías documentales verificables, control estricto de capacidad de carga ecológica en tiempo real y un fondo directo de conservación ambiental por cada reservación.
-            </p>
+            <h1 className="font-serif text-3xl sm:text-4xl">{t("about.title")}</h1>
+            <p className="text-sm text-muted-foreground leading-relaxed">{t("about.body")}</p>
           </div>
         </main>
       )}
 
-      {/* MODAL DETALLE DE ACTIVIDAD + RESEÑAS VERIFICADAS + CHAT DIRECTO */}
+      {/* ACTIVITY DETAIL + VERIFIED REVIEWS + DIRECT CHAT MODAL */}
       {detailExp && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-2xl w-full p-6 sm:p-8 shadow-xl relative my-8 max-h-[90vh] overflow-y-auto">
@@ -999,7 +820,7 @@ export default function App() {
 
             <div className="flex items-center gap-3 mb-2">
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#728C69] uppercase">
-                <ShieldCheck className="w-4 h-4" /> Experiencia Verificada
+                <ShieldCheck className="w-4 h-4" /> {t("detail.verifiedBadge")}
               </span>
               {reviewsData.total_reviews > 0 && (
                 <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-0.5 rounded-full">
@@ -1010,26 +831,30 @@ export default function App() {
             </div>
 
             <h2 className="font-serif text-2xl sm:text-3xl mb-3">{detailExp.title}</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              {detailExp.sustainable_practices}
-            </p>
+            <p className="text-sm text-muted-foreground mb-5">{detailExp.sustainable_practices}</p>
 
             <div className="grid grid-cols-3 gap-3 bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl text-xs mb-6">
               <div className="flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-[#728C69]" /> {detailExp.borough_cdmx}
               </div>
               <div className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-[#728C69]" /> {detailExp.duration_minutes} min
+                <Clock className="w-4 h-4 text-[#728C69]" />{" "}
+                {t("detail.minutes", { min: detailExp.duration_minutes })}
               </div>
               <div className="flex items-center gap-1.5">
-                <Users className="w-4 h-4 text-[#728C69]" /> Máx {detailExp.max_capacity}
+                <Users className="w-4 h-4 text-[#728C69]" />{" "}
+                {t("detail.maxCap", { cap: detailExp.max_capacity })}
               </div>
             </div>
 
             <div className="flex items-center justify-between pb-6 border-b border-border">
               <div>
-                <span className="text-xs text-muted-foreground block">Tarifa por persona</span>
-                <span className="text-xl font-bold">${detailExp.price} MXN</span>
+                <span className="text-xs text-muted-foreground block">
+                  {t("detail.pricePerPerson")}
+                </span>
+                <span className="text-xl font-bold">
+                  ${detailExp.price} {t("common.mxn")}
+                </span>
               </div>
               {canReserve ? (
                 <button
@@ -1040,16 +865,16 @@ export default function App() {
                   }}
                   className="bg-[#C81D77] hover:bg-[#A91864] text-white text-sm font-medium px-6 py-3 rounded-full"
                 >
-                  Reservar ahora
+                  {t("detail.reserveNow")}
                 </button>
               ) : (
                 <span className="text-xs text-muted-foreground bg-[#F2EFE9] dark:bg-[#18201C] px-4 py-2 rounded-full">
-                  Solo cuentas Turista pueden reservar
+                  {t("detail.touristOnlyReserve")}
                 </span>
               )}
             </div>
 
-            {/* PESTAÑAS SOCIALES */}
+            {/* Social Tabs */}
             <div className="flex gap-2 mt-5 mb-4">
               <button
                 onClick={() => setDetailTab("reviews")}
@@ -1059,7 +884,7 @@ export default function App() {
                     : "bg-[#F2EFE9] dark:bg-[#18201C]"
                 }`}
               >
-                Reseñas Verificadas ({reviewsData.total_reviews})
+                {t("detail.tabReviews", { count: reviewsData.total_reviews })}
               </button>
               {isTourist && (
                 <button
@@ -1071,7 +896,7 @@ export default function App() {
                   }`}
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
-                  Contactar Cooperativa
+                  {t("detail.tabChat")}
                 </button>
               )}
             </div>
@@ -1083,17 +908,13 @@ export default function App() {
                     {hasAlreadyReviewed ? (
                       <div className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl text-xs flex items-center gap-2.5 text-[#3B523E] dark:text-[#A5B29A]">
                         <CheckCircle2 className="w-4 h-4 shrink-0 text-[#728C69]" />
-                        <span>
-                          Ya publicaste tu reseña verificada para esta experiencia (límite de 1 reseña por visitante).
-                        </span>
+                        <span>{t("detail.alreadyReviewed")}</span>
                       </div>
                     ) : !hasVisitedExperience ? (
                       <div className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl text-xs flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5 text-muted-foreground">
                           <Lock className="w-4 h-4 shrink-0 text-[#C81D77]" />
-                          <span>
-                            Para evitar reseñas falsas, debes reservar y visitar esta experiencia antes de calificarla.
-                          </span>
+                          <span>{t("detail.mustVisitNotice")}</span>
                         </div>
                         <button
                           type="button"
@@ -1104,7 +925,7 @@ export default function App() {
                           }}
                           className="shrink-0 bg-[#728C69] text-white px-3 py-1.5 rounded-xl font-semibold"
                         >
-                          Reservar
+                          {t("card.reserve")}
                         </button>
                       </div>
                     ) : (
@@ -1113,7 +934,7 @@ export default function App() {
                         className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl space-y-3"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-bold">Comparte tu experiencia verificada</span>
+                          <span className="text-xs font-bold">{t("detail.shareExperience")}</span>
                           <div className="flex items-center gap-1">
                             {[1, 2, 3, 4, 5].map((star) => (
                               <button
@@ -1137,7 +958,7 @@ export default function App() {
                         <textarea
                           required
                           rows={2}
-                          placeholder="¿Cómo fue la experiencia y el cuidado ambiental del lugar?"
+                          placeholder={t("detail.reviewPlaceholder")}
                           value={reviewComment}
                           onChange={(e) => setReviewComment(e.target.value)}
                           className="w-full bg-white dark:bg-[#2A312C] rounded-xl p-3 text-xs"
@@ -1150,15 +971,15 @@ export default function App() {
                               checked={reviewEcoVerified}
                               onChange={(e) => setReviewEcoVerified(e.target.checked)}
                             />
-                            <span>Confirmo cumplimiento ecológico real</span>
+                            <span>{t("detail.confirmEco")}</span>
                           </label>
 
                           <label className="inline-flex items-center gap-1.5 cursor-pointer text-[#728C69] font-medium">
                             <Camera className="w-3.5 h-3.5" />
                             <span>
                               {reviewPhotos?.length
-                                ? `${reviewPhotos.length} foto(s) lista(s)`
-                                : "Adjuntar fotos"}
+                                ? t("detail.photosReady", { count: reviewPhotos.length })
+                                : t("detail.attachPhotos")}
                             </span>
                             <input
                               ref={reviewPhotosInputRef}
@@ -1186,7 +1007,7 @@ export default function App() {
                           type="submit"
                           className="bg-[#728C69] hover:bg-[#5B7153] text-white text-xs font-semibold px-4 py-2 rounded-xl"
                         >
-                          {reviewSubmitting ? "Publicando..." : "Publicar reseña"}
+                          {reviewSubmitting ? t("detail.publishingReview") : t("detail.publishReview")}
                         </button>
                       </form>
                     )}
@@ -1194,9 +1015,7 @@ export default function App() {
                 )}
 
                 {reviewsData.reviews.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Aún no hay reseñas para esta experiencia. ¡Sé el primero en compartir tu visita!
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("detail.noReviews")}</p>
                 ) : (
                   <div className="space-y-3">
                     {reviewsData.reviews.map((rev: any) => (
@@ -1206,10 +1025,12 @@ export default function App() {
                       >
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold">Turista #{rev.touristId}</span>
+                            <span className="font-bold">
+                              {t("detail.touristLabel", { id: rev.touristId })}
+                            </span>
                             {rev.ecologicalComplianceVerified && (
                               <span className="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-semibold">
-                                Cumplimiento ecológico verificado
+                                {t("detail.ecoVerifiedTag")}
                               </span>
                             )}
                           </div>
@@ -1219,7 +1040,7 @@ export default function App() {
                         {Array.isArray(rev.photoKeys) && rev.photoKeys.length > 0 && (
                           <div className="pt-1.5">
                             <p className="text-[10px] text-[#728C69] font-medium mb-1.5">
-                              {rev.photoKeys.length} fotografía(s) probatoria(s) en RustFS/S3
+                              {t("detail.photoProof", { count: rev.photoKeys.length })}
                             </p>
                             <div className="flex flex-wrap gap-2">
                               {rev.photoKeys.map((_: any, photoIdx: number) => {
@@ -1234,7 +1055,7 @@ export default function App() {
                                   >
                                     <img
                                       src={photoUrl}
-                                      alt={`Evidencia ${photoIdx + 1}`}
+                                      alt={`Proof ${photoIdx + 1}`}
                                       loading="lazy"
                                       className="w-full h-full object-cover"
                                     />
@@ -1252,16 +1073,12 @@ export default function App() {
             ) : (
               <div className="space-y-4">
                 {!session.token ? (
-                  <p className="text-xs text-muted-foreground">
-                    Inicia sesión como turista para enviar consultas directas a la cooperativa.
-                  </p>
+                  <p className="text-xs text-muted-foreground">{t("detail.chatLoginNotice")}</p>
                 ) : (
                   <>
                     <div className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-2xl p-4 max-h-48 overflow-y-auto space-y-2">
                       {chatHistory.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          Inicia una conversación con la cooperativa sobre horarios, accesibilidad o transporte público.
-                        </p>
+                        <p className="text-xs text-muted-foreground">{t("detail.chatEmpty")}</p>
                       ) : (
                         chatHistory.map((m: any, idx: number) => (
                           <div
@@ -1269,7 +1086,9 @@ export default function App() {
                             className="bg-white dark:bg-[#2A312C] rounded-xl p-2.5 text-xs"
                           >
                             <span className="font-bold text-[#728C69] block mb-0.5">
-                              {m.senderRole === "PROVIDER" ? "Cooperativa" : `Turista #${m.senderId}`}
+                              {m.senderRole === "PROVIDER"
+                                ? t("detail.coopLabel")
+                                : t("detail.touristLabel", { id: m.senderId })}
                             </span>
                             <span>{m.content}</span>
                           </div>
@@ -1284,7 +1103,7 @@ export default function App() {
                         required
                         value={chatText}
                         onChange={(e) => setChatText(e.target.value)}
-                        placeholder="Escribe tu consulta para la cooperativa..."
+                        placeholder={t("detail.chatPlaceholder")}
                         className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-3 h-10 text-xs"
                       />
                       <button
@@ -1293,7 +1112,7 @@ export default function App() {
                         className="bg-[#C81D77] text-white px-4 rounded-xl text-xs font-medium flex items-center gap-1.5"
                       >
                         <Send className="w-3.5 h-3.5" />
-                        Enviar
+                        {t("common.send")}
                       </button>
                     </form>
                   </>
@@ -1304,155 +1123,181 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL CHECKOUT & PASE ECOLÓGICO */}
-      {checkoutExp && (() => {
-        const todayLocal = getLocalDateString(0);
-        const maxCap = Math.max(1, checkoutExp.max_capacity || 1);
-        const baseAmount = Number((checkoutExp.price * guests).toFixed(2));
-        const impactAmount = Number((baseAmount * 0.05).toFixed(2));
-        const totalAmount = Number((baseAmount + impactAmount).toFixed(2));
-        return (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-md w-full p-6 sm:p-8 shadow-xl">
-            {bookingReceipt ? (
-              <div className="text-center space-y-4">
-                <div className="w-14 h-14 rounded-full bg-green-100 text-green-700 flex items-center justify-center mx-auto">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <h2 className="font-serif text-2xl">¡Reservación Confirmada!</h2>
-                <p className="text-xs text-muted-foreground">{bookingReceipt.title}</p>
-                <div className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-2xl p-4 space-y-1">
-                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Pase de Acceso Ecológico
-                  </span>
-                  <p className="font-mono text-xl font-bold text-[#728C69]">
-                    {bookingReceipt.access_code}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Fecha: {bookingReceipt.date} · {bookingReceipt.guests} visitantes
-                  </p>
-                  <p className="text-xs text-[#728C69] font-medium">
-                    Fondo ambiental (5%): ${Number(bookingReceipt.impact_contribution ?? 0).toFixed(2)} MXN
-                  </p>
-                  <p className="text-xs font-bold">
-                    Total pagado: ${Number(bookingReceipt.total ?? 0).toFixed(2)} MXN
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setCheckoutExp(null);
-                    setView("reservas");
-                  }}
-                  className="w-full bg-[#728C69] text-white rounded-xl h-12 text-sm font-medium"
-                >
-                  Ver en Mis Reservas
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 text-xs font-bold text-[#728C69] uppercase mb-1">
-                  <Leaf className="w-4 h-4" /> Checkout Sustentable
-                </div>
-                <h2 className="font-serif text-2xl mb-1">{checkoutExp.title}</h2>
-                <p className="text-xs text-muted-foreground mb-5">
-                  {checkoutExp.borough_cdmx}, CDMX · Cupo ecológico máx: {maxCap}
-                </p>
-
-                {bookingError && (
-                  <div className="p-3 rounded-xl bg-red-50 text-red-700 text-xs mb-4 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{bookingError}</span>
-                  </div>
-                )}
-
-                {pendingBookingId && (
-                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-xs mb-4">
-                    Tu cupo sigue apartado (Reserva #{pendingBookingId}). Puedes reintentar el pago sin crear duplicados o cancelar para liberar el cupo.
-                  </div>
-                )}
-
-                <div className="space-y-4 mb-6 text-sm">
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Fecha de visita</label>
-                    <input
-                      type="date"
-                      disabled={bookingLoading || Boolean(pendingBookingId)}
-                      value={bookingDate}
-                      min={todayLocal}
-                      onChange={(e) => setBookingDate(e.target.value)}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Número de visitantes</label>
-                    <input
-                      type="number"
-                      disabled={bookingLoading || Boolean(pendingBookingId)}
-                      min={1}
-                      max={maxCap}
-                      value={guests}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isNaN(val)) return;
-                        setGuests(Math.min(maxCap, Math.max(1, val)));
+      {/* CHECKOUT & ECOLOGICAL PASS MODAL */}
+      {checkoutExp &&
+        (() => {
+          const todayLocal = getLocalDateString(0);
+          const maxCap = Math.max(1, checkoutExp.max_capacity || 1);
+          const baseAmount = Number((checkoutExp.price * guests).toFixed(2));
+          const impactAmount = Number((baseAmount * 0.05).toFixed(2));
+          const totalAmount = Number((baseAmount + impactAmount).toFixed(2));
+          return (
+            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-md w-full p-6 sm:p-8 shadow-xl">
+                {bookingReceipt ? (
+                  <div className="text-center space-y-4">
+                    <div className="w-14 h-14 rounded-full bg-green-100 text-green-700 flex items-center justify-center mx-auto">
+                      <CheckCircle2 className="w-8 h-8" />
+                    </div>
+                    <h2 className="font-serif text-2xl">{t("checkout.confirmedTitle")}</h2>
+                    <p className="text-xs text-muted-foreground">{bookingReceipt.title}</p>
+                    <div className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-2xl p-4 space-y-1">
+                      <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                        {t("checkout.ecoPassLabel")}
+                      </span>
+                      <p className="font-mono text-xl font-bold text-[#728C69]">
+                        {bookingReceipt.access_code}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {t("checkout.receiptDateGuests", {
+                          date: bookingReceipt.date,
+                          guests: bookingReceipt.guests,
+                        })}
+                      </p>
+                      <p className="text-xs text-[#728C69] font-medium">
+                        {t("checkout.receiptImpact", {
+                          amount: Number(bookingReceipt.impact_contribution ?? 0).toFixed(2),
+                        })}
+                      </p>
+                      <p className="text-xs font-bold">
+                        {t("checkout.receiptTotal", {
+                          amount: Number(bookingReceipt.total ?? 0).toFixed(2),
+                        })}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setCheckoutExp(null);
+                        setView("reservas");
                       }}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
-                    />
+                      className="w-full bg-[#728C69] text-white rounded-xl h-12 text-sm font-medium"
+                    >
+                      {t("checkout.viewBookings")}
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">
-                      Notas de accesibilidad (opcional)
-                    </label>
-                    <input
-                      disabled={bookingLoading || Boolean(pendingBookingId)}
-                      placeholder="Ej. Acceso a nivel de embarcadero"
-                      value={accessNotes}
-                      onChange={(e) => setAccessNotes(e.target.value)}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
-                    />
-                  </div>
-                  <div className="pt-3 border-t border-border space-y-1 text-xs">
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>Subtotal ({guests} visitante{guests === 1 ? "" : "s"})</span>
-                      <span>${baseAmount.toFixed(2)} MXN</span>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 text-xs font-bold text-[#728C69] uppercase mb-1">
+                      <Leaf className="w-4 h-4" /> {t("checkout.badge")}
                     </div>
-                    <div className="flex justify-between text-[#728C69]">
-                      <span>Fondo ambiental (5%)</span>
-                      <span>${impactAmount.toFixed(2)} MXN</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-sm pt-1">
-                      <span>Total</span>
-                      <span>${totalAmount.toFixed(2)} MXN</span>
-                    </div>
-                  </div>
-                </div>
+                    <h2 className="font-serif text-2xl mb-1">{checkoutExp.title}</h2>
+                    <p className="text-xs text-muted-foreground mb-5">
+                      {t("checkout.maxCap", {
+                        borough: checkoutExp.borough_cdmx,
+                        cap: maxCap,
+                      })}
+                    </p>
 
-                <div className="flex gap-3">
-                  <button
-                    disabled={bookingLoading}
-                    onClick={handleCancelCheckoutModal}
-                    className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl h-11 text-sm font-medium disabled:opacity-50"
-                  >
-                    {pendingBookingId ? "Cancelar reserva" : "Cancelar"}
-                  </button>
-                  <button
-                    disabled={bookingLoading}
-                    onClick={handlePayBooking}
-                    className="flex-1 bg-[#C81D77] hover:bg-[#A91864] text-white rounded-xl h-11 text-sm font-medium disabled:opacity-50"
-                  >
-                    {bookingLoading
-                      ? "Procesando..."
-                      : pendingBookingId
-                      ? "Reintentar Pago"
-                      : "Confirmar y Pagar"}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-        );
-      })()}
+                    {bookingError && (
+                      <div className="p-3 rounded-xl bg-red-50 text-red-700 text-xs mb-4 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{bookingError}</span>
+                      </div>
+                    )}
+
+                    {pendingBookingId && (
+                      <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-xs mb-4">
+                        {t("checkout.pendingHold", { id: pendingBookingId })}
+                      </div>
+                    )}
+
+                    <div className="space-y-4 mb-6 text-sm">
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          {t("checkout.visitDate")}
+                        </label>
+                        <input
+                          type="date"
+                          disabled={bookingLoading || Boolean(pendingBookingId)}
+                          value={bookingDate}
+                          min={todayLocal}
+                          onChange={(e) => setBookingDate(e.target.value)}
+                          className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          {t("checkout.guestsCount")}
+                        </label>
+                        <input
+                          type="number"
+                          disabled={bookingLoading || Boolean(pendingBookingId)}
+                          min={1}
+                          max={maxCap}
+                          value={guests}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            if (Number.isNaN(val)) return;
+                            setGuests(Math.min(maxCap, Math.max(1, val)));
+                          }}
+                          className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          {t("checkout.accessNotes")}
+                        </label>
+                        <input
+                          disabled={bookingLoading || Boolean(pendingBookingId)}
+                          placeholder={t("checkout.accessNotesPlaceholder")}
+                          value={accessNotes}
+                          onChange={(e) => setAccessNotes(e.target.value)}
+                          className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
+                        />
+                      </div>
+                      <div className="pt-3 border-t border-border space-y-1 text-xs">
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>
+                            {t("checkout.subtotal", {
+                              count: guests,
+                              plural: guests === 1 ? "" : "s",
+                            })}
+                          </span>
+                          <span>
+                            ${baseAmount.toFixed(2)} {t("common.mxn")}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-[#728C69]">
+                          <span>{t("checkout.impactFund")}</span>
+                          <span>
+                            ${impactAmount.toFixed(2)} {t("common.mxn")}
+                          </span>
+                        </div>
+                        <div className="flex justify-between font-bold text-sm pt-1">
+                          <span>{t("checkout.total")}</span>
+                          <span>
+                            ${totalAmount.toFixed(2)} {t("common.mxn")}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button
+                        disabled={bookingLoading}
+                        onClick={handleCancelCheckoutModal}
+                        className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl h-11 text-sm font-medium disabled:opacity-50"
+                      >
+                        {pendingBookingId ? t("checkout.cancelBooking") : t("common.cancel")}
+                      </button>
+                      <button
+                        disabled={bookingLoading}
+                        onClick={handlePayBooking}
+                        className="flex-1 bg-[#C81D77] hover:bg-[#A91864] text-white rounded-xl h-11 text-sm font-medium disabled:opacity-50"
+                      >
+                        {bookingLoading
+                          ? t("common.processing")
+                          : pendingBookingId
+                          ? t("checkout.retryPay")
+                          : t("checkout.confirmPay")}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }

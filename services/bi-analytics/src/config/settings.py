@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     rabbitmq_url: str
     catalog_service_url: str = "http://catalog-service:8000"
+    auth_service_url: str = "http://auth-service:8000"
+    booking_service_url: str = "http://booking-service:8000"
+    social_service_url: str = "http://social-service:3000"
+    ai_service_url: str = "http://ai-service:8000"
 
 
 # Instanciar configuracion global

@@ -149,3 +149,21 @@ def get_experience_by_id(
 
     exp, lat, lon = row
     return _serialize_experience(exp, lat, lon)
+
+
+def list_provider_experiences(
+    db: Session,
+    provider_id: int,
+    limit: int = 100,
+    offset: int = 0
+) -> list[dict]:
+    """Return all experiences (active and pending) owned by the provider."""
+    results = (
+        _query_with_coords(db)
+        .filter(Experience.provider_id == provider_id)
+        .order_by(Experience.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [_serialize_experience(exp, lat, lon) for exp, lat, lon in results]

@@ -1,4 +1,5 @@
 import React from "react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 export interface ActividadItem {
   id: number;
@@ -31,14 +32,15 @@ export default function TarjetaActividad({
   onVerDetalle,
   canReserve = true,
 }: TarjetaActividadProps) {
-  const formattedPrecio = `$${Number(actividad.price).toLocaleString("es-MX")}`;
+  const { lang, t, formatCategory } = useLanguage();
+  const formattedPrecio = `$${Number(actividad.price).toLocaleString(lang === "es" ? "es-MX" : "en-US")}`;
 
   return (
     <div
       onClick={() => onVerDetalle(actividad)}
       className="cursor-pointer bg-white dark:bg-[#2A312C] rounded-[1.5rem] overflow-hidden shadow-sm border border-transparent dark:border-white/5 group hover:shadow-md transition-all flex flex-col justify-between"
     >
-      {/* Cabecera ilustrada con montañas */}
+      {/* Mountain illustration header */}
       <div className="relative h-52 w-full overflow-hidden bg-[#B0C49F] dark:opacity-90">
         <svg
           viewBox="0 0 400 200"
@@ -49,13 +51,13 @@ export default function TarjetaActividad({
           <polygon points="200,200 300,120 400,200" fill="#364935" />
         </svg>
 
-        {/* Botón de Favorito */}
+        {/* Favorite Button */}
         <button
           onClick={(e) => {
             e.stopPropagation();
             onToggleFavorite(actividad.id);
           }}
-          aria-label={isFavorite ? "Quitar de favoritos" : "Guardar en favoritos"}
+          aria-label={isFavorite ? t("card.favRemove") : t("card.favAdd")}
           className="absolute top-4 right-4 z-20 w-9 h-9 bg-white/40 dark:bg-black/30 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-white/60 transition-all hover:scale-110 active:scale-95"
         >
           <svg
@@ -70,27 +72,27 @@ export default function TarjetaActividad({
           </svg>
         </button>
 
-        {/* Etiqueta de Categoría */}
+        {/* Category Tag */}
         <span className="absolute top-4 left-4 z-20 bg-black/50 backdrop-blur-md text-white text-[10px] font-bold tracking-widest uppercase px-3 py-1.5 rounded-full">
-          {actividad.category}
+          {formatCategory(actividad.category)}
         </span>
 
-        {/* Insignias ecológicas inferiores */}
+        {/* Bottom eco badges */}
         <div className="absolute bottom-3 left-4 z-20 flex gap-1.5">
           {actividad.pet_friendly && (
             <span className="bg-white/85 text-[#1E201D] text-[10px] font-semibold px-2.5 py-0.5 rounded-full">
-              Pet Friendly
+              {t("common.petFriendly")}
             </span>
           )}
           {actividad.accessible && (
             <span className="bg-white/85 text-[#1E201D] text-[10px] font-semibold px-2.5 py-0.5 rounded-full">
-              Accesible
+              {t("common.accessible")}
             </span>
           )}
         </div>
       </div>
 
-      {/* Detalles de la Actividad */}
+      {/* Activity Details */}
       <div className="p-5 flex flex-col flex-1 justify-between">
         <div>
           <div className="flex justify-between items-start mb-2">
@@ -109,7 +111,7 @@ export default function TarjetaActividad({
                 </>
               ) : (
                 <span className="text-[11px] font-semibold text-[#3B523E] dark:text-[#A5B29A]">
-                  Verificado
+                  {t("common.verified")}
                 </span>
               )}
             </div>
@@ -117,7 +119,7 @@ export default function TarjetaActividad({
 
           <p className="text-sm text-[#63665E] dark:text-[#9EA399] mb-2 flex items-center gap-1.5">
             <span>
-              {actividad.borough_cdmx}, CDMX · Cupo máx: {actividad.max_capacity}
+              {actividad.borough_cdmx}, {t("common.cdmx")} · {t("card.maxCap", { cap: actividad.max_capacity })}
             </span>
           </p>
           <p className="text-xs text-[#8C9287] line-clamp-2 mb-4">
@@ -127,10 +129,10 @@ export default function TarjetaActividad({
 
         <div className="flex items-center justify-between pt-4 border-t border-[#E3E5D8] dark:border-[#3D453F] mt-auto">
           <div>
-            <span className="text-xs text-[#8C9287] block mb-0.5">Desde</span>
+            <span className="text-xs text-[#8C9287] block mb-0.5">{t("card.from")}</span>
             <span className="text-base font-bold text-[#1E201D] dark:text-white">
               {formattedPrecio}{" "}
-              <span className="text-xs font-normal text-muted-foreground">MXN</span>
+              <span className="text-xs font-normal text-muted-foreground">{t("common.mxn")}</span>
             </span>
           </div>
           {canReserve ? (
@@ -141,11 +143,11 @@ export default function TarjetaActividad({
               }}
               className="bg-[#728C69] hover:bg-[#5B7153] text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
             >
-              Reservar
+              {t("card.reserve")}
             </button>
           ) : (
             <span className="text-xs font-medium text-[#728C69] dark:text-[#A5B29A] px-3 py-1.5 rounded-xl bg-[#F4F1EA] dark:bg-[#18201C]">
-              Ver detalle
+              {t("card.viewDetail")}
             </span>
           )}
         </div>

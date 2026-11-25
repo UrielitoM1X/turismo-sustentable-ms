@@ -6,6 +6,7 @@ from src.schemas.catalog_schema import ExperienceCreateRequest
 from src.controllers.experience_controller import (
     create_experience,
     get_experience_by_id,
+    list_provider_experiences,
     search_experiences,
 )
 
@@ -46,6 +47,18 @@ def list_experiences(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/mine")
+def list_my_experiences(
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    payload: dict = Depends(verify_jwt_token),
+    db: Session = Depends(get_db)
+):
+    if payload.get("role") != "PROVIDER":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo proveedores pueden consultar sus experiencias")
+    return list_provider_experiences(db, int(payload["sub"]), limit=limit, offset=offset)
 
 
 @router.get("/{experience_id}")

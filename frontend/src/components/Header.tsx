@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Moon, Sun, Globe, LogOut, ChevronDown, Menu, X } from "lucide-react";
+import { useLanguage } from "../i18n/LanguageContext";
 
 export type RouteView =
   | "home"
@@ -10,6 +11,7 @@ export type RouteView =
   | "admin-auditorias"
   | "admin-bi"
   | "negocio-dashboard"
+  | "negocio-monitoreo"
   | "negocio-nueva"
   | "negocio-documentos"
   | "about"
@@ -20,8 +22,6 @@ interface HeaderProps {
   onNavigate: (view: RouteView) => void;
   session: { token: string | null; role: string | null; name: string | null };
   onLogout: () => void;
-  lang: "es" | "en";
-  onToggleLang: () => void;
 }
 
 export default function Header({
@@ -29,9 +29,8 @@ export default function Header({
   onNavigate,
   session,
   onLogout,
-  lang,
-  onToggleLang,
 }: HeaderProps) {
+  const { lang, toggleLang, t, formatRole } = useLanguage();
   const [isScrolled, setIsScrolled] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -78,33 +77,34 @@ export default function Header({
 
   const navLinks: { name: string; view: RouteView }[] = isAdmin
     ? [
-        { name: lang === "es" ? "Inicio" : "Home", view: "home" },
-        { name: lang === "es" ? "Auditorías" : "Audits", view: "admin-auditorias" },
-        { name: lang === "es" ? "Panel BI" : "BI Panel", view: "admin-bi" },
-        { name: lang === "es" ? "Catálogo" : "Catalog", view: "busqueda" },
-        { name: lang === "es" ? "Nosotros" : "About", view: "about" },
+        { name: t("header.nav.home"), view: "home" },
+        { name: t("header.nav.audits"), view: "admin-auditorias" },
+        { name: t("header.nav.bi"), view: "admin-bi" },
+        { name: t("header.nav.catalog"), view: "busqueda" },
+        { name: t("header.nav.about"), view: "about" },
       ]
     : isProvider
     ? [
-        { name: lang === "es" ? "Inicio" : "Home", view: "home" },
-        { name: lang === "es" ? "Mi Negocio" : "My Business", view: "negocio-dashboard" },
-        { name: lang === "es" ? "Evidencias" : "Evidence", view: "negocio-documentos" },
-        { name: lang === "es" ? "Catálogo" : "Catalog", view: "busqueda" },
-        { name: lang === "es" ? "Nosotros" : "About", view: "about" },
+        { name: t("header.nav.home"), view: "home" },
+        { name: t("header.nav.myBusiness"), view: "negocio-dashboard" },
+        { name: t("header.nav.monitoring"), view: "negocio-monitoreo" },
+        { name: t("header.nav.evidence"), view: "negocio-documentos" },
+        { name: t("header.nav.catalog"), view: "busqueda" },
+        { name: t("header.nav.about"), view: "about" },
       ]
     : isTourist
     ? [
-        { name: lang === "es" ? "Inicio" : "Home", view: "home" },
-        { name: lang === "es" ? "Explorar" : "Explore", view: "busqueda" },
-        { name: lang === "es" ? "Guía IA" : "AI Guide", view: "ia" },
-        { name: lang === "es" ? "Mis Reservas" : "My Bookings", view: "reservas" },
-        { name: lang === "es" ? "Nosotros" : "About", view: "about" },
+        { name: t("header.nav.home"), view: "home" },
+        { name: t("header.nav.explore"), view: "busqueda" },
+        { name: t("header.nav.ai"), view: "ia" },
+        { name: t("header.nav.bookings"), view: "reservas" },
+        { name: t("header.nav.about"), view: "about" },
       ]
     : [
-        { name: lang === "es" ? "Inicio" : "Home", view: "home" },
-        { name: lang === "es" ? "Explorar" : "Explore", view: "busqueda" },
-        { name: lang === "es" ? "Guía IA" : "AI Guide", view: "ia" },
-        { name: lang === "es" ? "Nosotros" : "About", view: "about" },
+        { name: t("header.nav.home"), view: "home" },
+        { name: t("header.nav.explore"), view: "busqueda" },
+        { name: t("header.nav.ai"), view: "ia" },
+        { name: t("header.nav.about"), view: "about" },
       ];
 
   const getInitials = (name?: string | null) => {
@@ -129,12 +129,12 @@ export default function Header({
           className="text-sm font-bold tracking-widest text-foreground flex items-center gap-2 ml-2"
         >
           <div className="bg-green-700/10 p-1.5 rounded-full flex items-center justify-center">
-            <img src="/hoja.svg" alt="Hoja" className="w-4 h-4" />
+            <img src="/hoja.svg" alt={t("header.brand")} className="w-4 h-4" />
           </div>
-          <span>TURISMO SUSTENTABLE</span>
+          <span>{t("header.brand")}</span>
         </button>
 
-        {/* Navegación central */}
+        {/* Central navigation */}
         <nav className="hidden items-center gap-6 md:flex">
           {navLinks.map((link) => {
             const isActive = currentView === link.view;
@@ -157,11 +157,11 @@ export default function Header({
           })}
         </nav>
 
-        {/* Acciones de usuario y tema */}
+        {/* User actions & theme/language toggles */}
         <div className="flex items-center gap-2 relative">
           <button
-            onClick={onToggleLang}
-            title="Cambiar idioma"
+            onClick={toggleLang}
+            title={t("header.langTooltip")}
             className="h-9 px-2.5 rounded-full border border-gray-200 dark:border-white/10 hover:border-[#728C69] text-xs font-semibold flex items-center gap-1"
           >
             <Globe className="w-3.5 h-3.5" />
@@ -170,7 +170,7 @@ export default function Header({
 
           <button
             onClick={toggleDark}
-            title="Tema claro / oscuro"
+            title={t("header.themeTooltip")}
             className="w-9 h-9 rounded-full border border-gray-200 dark:border-white/10 hover:border-[#728C69] flex items-center justify-center"
           >
             {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -187,7 +187,7 @@ export default function Header({
                   {getInitials(session.name)}
                 </span>
                 <span className="text-xs font-medium max-w-[100px] truncate hidden sm:inline-block">
-                  {session.name?.split("@")[0] || "Mi cuenta"}
+                  {session.name?.split("@")[0] || t("header.myAccount")}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
@@ -197,7 +197,7 @@ export default function Header({
                   <div className="px-2 py-1.5 border-b border-gray-100 dark:border-white/10 mb-1">
                     <p className="text-sm font-semibold truncate">{session.name}</p>
                     <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#728C69]/15 text-[#728C69] dark:text-[#A5B29A] uppercase tracking-wider">
-                      {role}
+                      {formatRole(role)}
                     </span>
                   </div>
 
@@ -207,13 +207,13 @@ export default function Header({
                         onClick={() => { setMenuOpen(false); onNavigate("admin-auditorias"); }}
                         className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium text-[#C81D77] hover:bg-muted"
                       >
-                        Auditoría de Evidencias
+                        {t("header.menu.auditEvidence")}
                       </button>
                       <button
                         onClick={() => { setMenuOpen(false); onNavigate("admin-bi"); }}
                         className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium hover:bg-muted"
                       >
-                        Panel BI y Analítica
+                        {t("header.menu.biPanel")}
                       </button>
                     </>
                   )}
@@ -224,13 +224,19 @@ export default function Header({
                         onClick={() => { setMenuOpen(false); onNavigate("negocio-dashboard"); }}
                         className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium text-[#728C69] hover:bg-muted"
                       >
-                        Mi Negocio y Experiencias
+                        {t("header.menu.myBusinessExp")}
+                      </button>
+                      <button
+                        onClick={() => { setMenuOpen(false); onNavigate("negocio-monitoreo"); }}
+                        className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium hover:bg-muted"
+                      >
+                        {t("header.menu.myMonitoring")}
                       </button>
                       <button
                         onClick={() => { setMenuOpen(false); onNavigate("negocio-documentos"); }}
                         className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium hover:bg-muted"
                       >
-                        Subir Evidencias
+                        {t("header.menu.uploadEvidence")}
                       </button>
                     </>
                   )}
@@ -241,13 +247,13 @@ export default function Header({
                         onClick={() => { setMenuOpen(false); onNavigate("reservas"); }}
                         className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium hover:bg-muted"
                       >
-                        Mis Reservaciones
+                        {t("header.menu.myBookings")}
                       </button>
                       <button
                         onClick={() => { setMenuOpen(false); onNavigate("perfil"); }}
                         className="w-full text-left px-2 py-2 rounded-lg text-xs font-medium hover:bg-muted"
                       >
-                        Mi Perfil y Favoritos
+                        {t("header.menu.myProfile")}
                       </button>
                     </>
                   )}
@@ -259,7 +265,7 @@ export default function Header({
                     }}
                     className="w-full text-left px-2 py-2 mt-1 border-t border-gray-100 dark:border-white/10 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2"
                   >
-                    <LogOut className="w-3.5 h-3.5" /> Cerrar sesión
+                    <LogOut className="w-3.5 h-3.5" /> {t("header.signOut")}
                   </button>
                 </div>
               )}
@@ -269,18 +275,16 @@ export default function Header({
               onClick={() => onNavigate("auth")}
               className="rounded-full px-5 h-10 flex items-center gap-2 border border-gray-200 dark:border-white/10 hover:border-[#728C69] bg-card transition-all"
             >
-              <img src="/usuario.svg" alt="Usuario" className="w-4 h-4" />
-              <span className="text-xs font-medium">
-                {lang === "es" ? "Iniciar sesión" : "Sign in"}
-              </span>
+              <img src="/usuario.svg" alt={t("header.signIn")} className="w-4 h-4" />
+              <span className="text-xs font-medium">{t("header.signIn")}</span>
             </button>
           )}
 
-          {/* Botón menú móvil */}
+          {/* Mobile menu toggle */}
           <button
             type="button"
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            aria-label="Abrir menú de navegación"
+            aria-label={t("header.mobileMenuAria")}
             aria-expanded={mobileMenuOpen}
             className="md:hidden w-9 h-9 rounded-full border border-gray-200 dark:border-white/10 hover:border-[#728C69] flex items-center justify-center"
           >
@@ -289,7 +293,7 @@ export default function Header({
         </div>
       </div>
 
-      {/* Menú de navegación móvil */}
+      {/* Mobile navigation menu */}
       {mobileMenuOpen && (
         <nav className="md:hidden border-t border-gray-200 dark:border-white/10 bg-background/95 backdrop-blur-lg px-4 py-3 space-y-1">
           {navLinks.map((link) => {

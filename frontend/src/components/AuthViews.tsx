@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { apiFetch, saveUserSession } from "../api/client";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface AuthViewsProps {
   initialError?: string;
@@ -8,6 +9,7 @@ interface AuthViewsProps {
 }
 
 export default function AuthViews({ initialError = "", onSuccess }: AuthViewsProps) {
+  const { lang, t } = useLanguage();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -29,14 +31,14 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
     try {
       if (mode === "register") {
         if (password.length < 8 || password.length > 72) {
-          throw new Error("La contraseña debe tener entre 8 y 72 caracteres.");
+          throw new Error(t("auth.passwordLengthError"));
         }
         const payload: Record<string, any> = {
           email: email.trim(),
           password,
           full_name: name.trim(),
           role,
-          preferred_language: "es",
+          preferred_language: lang,
         };
 
         if (role === "PROVIDER") {
@@ -50,7 +52,7 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
         });
 
         saveUserSession(res.access_token, res.role, name.trim() || email.trim());
-        setSuccess("Cuenta creada correctamente. Redirigiendo...");
+        setSuccess(t("auth.registerSuccess"));
         setTimeout(() => {
           onSuccess();
         }, 500);
@@ -96,10 +98,10 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
               </svg>
             </div>
             <h2 className="font-serif text-3xl lg:text-4xl text-[#1E201D] dark:text-white mb-2">
-              Bienvenido de nuevo
+              {t("auth.loginTitle")}
             </h2>
             <p className="text-sm text-[#63665E] dark:text-[#9EA399] mb-8">
-              Inicia sesión para planear tu próxima escapada.
+              {t("auth.loginSubtitle")}
             </p>
           </>
         ) : (
@@ -123,10 +125,10 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
               </svg>
             </div>
             <h2 className="font-serif text-3xl lg:text-4xl text-[#1E201D] dark:text-white mb-2">
-              Crear Cuenta
+              {t("auth.registerTitle")}
             </h2>
             <p className="text-sm text-[#63665E] dark:text-[#9EA399] mb-8">
-              Únete a nuestra comunidad sustentable.
+              {t("auth.registerSubtitle")}
             </p>
           </>
         )}
@@ -136,12 +138,12 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
             <>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-                  Nombre Completo
+                  {t("auth.fullName")}
                 </label>
                 <input
                   required
                   disabled={loading}
-                  placeholder="Tu nombre"
+                  placeholder={t("auth.fullNamePlaceholder")}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white placeholder-[#8C9287] rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
@@ -150,7 +152,7 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-                  Tipo de Perfil
+                  {t("auth.profileType")}
                 </label>
                 <select
                   disabled={loading}
@@ -158,8 +160,8 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
                   onChange={(e) => setRole(e.target.value as "TOURIST" | "PROVIDER")}
                   className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
                 >
-                  <option value="TOURIST">Turista</option>
-                  <option value="PROVIDER">Proveedor / Cooperativa</option>
+                  <option value="TOURIST">{t("auth.roleTourist")}</option>
+                  <option value="PROVIDER">{t("auth.roleProvider")}</option>
                 </select>
               </div>
 
@@ -167,12 +169,12 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-                      Nombre del Negocio
+                      {t("auth.businessName")}
                     </label>
                     <input
                       required
                       disabled={loading}
-                      placeholder="Chinampas Vivas SC"
+                      placeholder={t("auth.businessPlaceholder")}
                       value={businessName}
                       onChange={(e) => setBusinessName(e.target.value)}
                       className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-sm rounded-xl px-4 h-12"
@@ -180,7 +182,7 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-                      RFC (12 o 13 caracteres)
+                      {t("auth.rfc")}
                     </label>
                     <input
                       required
@@ -199,13 +201,13 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-              Correo / Usuario
+              {t("auth.email")}
             </label>
             <input
               required
               disabled={loading}
               type="email"
-              placeholder="usuario@correo.com"
+              placeholder={t("auth.emailPlaceholder")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white placeholder-[#8C9287] rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
@@ -214,7 +216,7 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-              Contraseña {mode === "register" && "(8 a 72 caracteres)"}
+              {t("auth.password")} {mode === "register" && t("auth.passwordHint")}
             </label>
             <input
               required
@@ -222,7 +224,7 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
               type="password"
               minLength={mode === "register" ? 8 : 6}
               maxLength={72}
-              placeholder={mode === "register" ? "Ej. Password123!" : "••••••••"}
+              placeholder={mode === "register" ? t("auth.passwordPlaceholder") : "••••••••"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white placeholder-[#8C9287] rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
@@ -249,16 +251,16 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
             className="w-full bg-[#C81D77] hover:bg-[#A91864] dark:bg-[#E24A96] dark:hover:bg-[#C81D77] text-white font-medium rounded-xl h-12 mt-2 transition-colors duration-300"
           >
             {loading
-              ? "Procesando..."
+              ? t("common.processing")
               : mode === "login"
-              ? "Iniciar Sesión"
-              : "Crear Cuenta"}
+              ? t("auth.submitLogin")
+              : t("auth.submitRegister")}
           </button>
         </form>
 
         <div className="mt-8 flex flex-col gap-6">
           <div className="flex justify-between items-center text-sm text-[#63665E] dark:text-[#9EA399]">
-            <span>{mode === "login" ? "¿Aún no tienes cuenta?" : "¿Ya tienes cuenta?"}</span>
+            <span>{mode === "login" ? t("auth.noAccount") : t("auth.hasAccount")}</span>
             <button
               type="button"
               onClick={() => {
@@ -268,12 +270,12 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
               }}
               className="text-[#C81D77] dark:text-[#E24A96] font-medium hover:underline"
             >
-              {mode === "login" ? "Crear perfil" : "Iniciar sesión"}
+              {mode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin")}
             </button>
           </div>
 
           <p className="text-center text-xs text-[#63665E] dark:text-[#9EA399]">
-            Al continuar, aceptas nuestros Términos y privacidad.
+            {t("auth.terms")}
           </p>
         </div>
       </div>

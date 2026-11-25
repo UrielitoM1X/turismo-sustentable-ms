@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import TarjetaActividad, { ActividadItem } from "./TarjetaActividad";
 import { apiFetch } from "../api/client";
 import { RouteView } from "./Header";
+import { useLanguage } from "../i18n/LanguageContext";
 
 interface PerfilPortalProps {
   session: { token: string | null; role: string | null; name: string | null };
@@ -24,6 +25,7 @@ export default function PerfilPortal({
   onNavigate,
   onLogout,
 }: PerfilPortalProps) {
+  const { t, formatRole } = useLanguage();
   const [subView, setSubView] = useState<"perfil" | "favoritos">("perfil");
   const [reservasCount, setReservasCount] = useState(0);
   const [totalImpactFund, setTotalImpactFund] = useState(0);
@@ -91,10 +93,10 @@ export default function PerfilPortal({
           accessibility_needs: accessibilityNeeds,
         }),
       });
-      setPrefsMsg({ type: "ok", text: "Preferencias guardadas correctamente." });
+      setPrefsMsg({ type: "ok", text: t("profile.prefsSaved") });
       setEditandoIntereses(false);
     } catch (err: any) {
-      setPrefsMsg({ type: "err", text: err.message || "Error al guardar preferencias" });
+      setPrefsMsg({ type: "err", text: err.message || t("profile.prefsError") });
     } finally {
       setSavingPrefs(false);
     }
@@ -119,22 +121,22 @@ export default function PerfilPortal({
               <circle cx="12" cy="7" r="4" />
             </svg>
           </div>
-          <h2 className="font-serif text-2xl mb-2">Inicia sesión</h2>
+          <h2 className="font-serif text-2xl mb-2">{t("profile.loginTitle")}</h2>
           <p className="text-sm text-[#63665E] dark:text-[#A5B29A] mb-6">
-            Inicia sesión con tu cuenta de Turista para consultar tus favoritos e impacto ambiental.
+            {t("profile.loginDesc")}
           </p>
           <button
             onClick={() => onNavigate("auth")}
             className="bg-[#728C69] hover:bg-[#5B7153] text-white text-sm font-medium px-6 py-3 rounded-xl transition-colors"
           >
-            Iniciar sesión
+            {t("header.signIn")}
           </button>
         </div>
       </main>
     );
   }
 
-  // SUBVISTA: MIS FAVORITOS
+  // SUBVIEW: FAVORITES
   if (subView === "favoritos") {
     return (
       <main className="min-h-[calc(100vh-4rem)] w-full bg-[#F4F1EA] dark:bg-[#1E2420] transition-colors duration-300 py-8 px-4 flex justify-center pb-24">
@@ -149,25 +151,26 @@ export default function PerfilPortal({
               </svg>
             </button>
             <div>
-              <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white">Mis Favoritos</h1>
+              <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white">
+                {t("profile.favTitle")}
+              </h1>
               <p className="text-sm text-[#63665E] dark:text-[#A5B29A]">
-                {favoritasList.length} experiencia{favoritasList.length === 1 ? "" : "s"} guardada
-                {favoritasList.length === 1 ? "" : "s"}
+                {t("profile.favCount", { count: favoritasList.length })}
               </p>
             </div>
           </div>
 
           {favoritasList.length === 0 ? (
             <div className="bg-white dark:bg-[#2A312C] border border-dashed border-[#8C9287]/40 rounded-3xl p-12 text-center my-6">
-              <h3 className="text-lg font-serif mb-2">Aún no has guardado favoritos</h3>
+              <h3 className="text-lg font-serif mb-2">{t("profile.favEmptyTitle")}</h3>
               <p className="text-sm text-[#63665E] dark:text-[#A5B29A] max-w-sm mx-auto mb-6">
-                Explora el catálogo y presiona el corazón en cualquier experiencia para armar tu ruta ecológica.
+                {t("profile.favEmptyDesc")}
               </p>
               <button
                 onClick={() => onNavigate("busqueda")}
                 className="text-xs bg-[#728C69] text-white px-5 py-2.5 rounded-full hover:bg-[#5B7153] transition-colors"
               >
-                Ir a explorar experiencias
+                {t("profile.favExplore")}
               </button>
             </div>
           ) : (
@@ -190,13 +193,15 @@ export default function PerfilPortal({
     );
   }
 
-  // VISTA PRINCIPAL: MI PERFIL
+  // MAIN VIEW: MY PROFILE
   return (
     <main className="min-h-[calc(100vh-4rem)] w-full bg-[#F4F1EA] dark:bg-[#1E2420] transition-colors duration-300 py-8 px-4 flex justify-center pb-24">
       <div className="w-full max-w-md flex flex-col">
-        {/* Encabezado */}
+        {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white">Mi perfil</h1>
+          <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white">
+            {t("profile.title")}
+          </h1>
           <button
             disabled={savingPrefs}
             onClick={() => {
@@ -209,34 +214,40 @@ export default function PerfilPortal({
             }}
             className="text-[#C81D77] dark:text-[#E24A96] text-sm font-medium hover:underline disabled:opacity-50"
           >
-            {savingPrefs ? "Guardando..." : editandoIntereses ? "Guardar" : "Preferencias"}
+            {savingPrefs
+              ? t("common.saving")
+              : editandoIntereses
+              ? t("common.save")
+              : t("profile.preferences")}
           </button>
         </div>
 
-        {/* Info de Usuario */}
+        {/* User Info */}
         <div className="flex items-center gap-4 mb-8">
           <div className="w-20 h-20 rounded-full bg-[#728C69] flex items-center justify-center text-white font-serif text-2xl flex-shrink-0 shadow-sm">
             {getInitials(profileName || session.name)}
           </div>
           <div>
             <h2 className="text-xl font-medium text-[#1E201D] dark:text-white">
-              {profileName || session.name || "Turista Sustentable"}
+              {profileName || session.name || t("auth.roleTourist")}
             </h2>
             <p className="text-xs text-[#728C69] dark:text-[#A5B29A] font-medium mt-1 uppercase tracking-wider">
-              {session.role || "Viajero consciente"} · CDMX
+              {session.role ? formatRole(session.role) : t("profile.defaultRole")} · {t("common.cdmx")}
             </p>
           </div>
         </div>
 
-        {/* Impacto Positivo */}
+        {/* Positive Impact */}
         <div className="bg-white dark:bg-[#2A312C] rounded-[1.5rem] p-5 mb-8 shadow-sm border border-transparent dark:border-white/5 flex justify-between items-center">
           <div>
             <h3 className="text-sm font-bold text-[#1E201D] dark:text-white mb-1">
-              Tu impacto positivo (5% por reserva)
+              {t("profile.impactTitle")}
             </h3>
             <p className="text-xs text-[#63665E] dark:text-[#A5B29A]">
-              {reservasCount} experiencia{reservasCount === 1 ? "" : "s"} reservada
-              {reservasCount === 1 ? "" : "s"} · ${totalImpactFund.toFixed(2)} MXN al fondo ambiental
+              {t("profile.impactDesc", {
+                count: reservasCount,
+                amount: totalImpactFund.toFixed(2),
+              })}
             </p>
           </div>
           <div className="text-center flex flex-col items-center">
@@ -252,12 +263,14 @@ export default function PerfilPortal({
               <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 1 8.3C18 19 15 20 11 20z" />
               <path d="M11 20c-5 0-9-4-9-9 0-4.5 3-7.5 5-9 1 1 2 2 3 4" />
             </svg>
-            <span className="text-[10px] text-[#8C9287]">Turismo ético</span>
+            <span className="text-[10px] text-[#8C9287]">{t("profile.ethicalTourism")}</span>
           </div>
         </div>
 
-        {/* Tu actividad (Reservas / Favoritos) */}
-        <h3 className="font-serif text-xl text-[#1E201D] dark:text-white mb-4">Tu actividad</h3>
+        {/* Activity */}
+        <h3 className="font-serif text-xl text-[#1E201D] dark:text-white mb-4">
+          {t("profile.yourActivity")}
+        </h3>
         <div className="grid grid-cols-2 gap-3 mb-8">
           <button
             onClick={() => onNavigate("reservas")}
@@ -267,7 +280,7 @@ export default function PerfilPortal({
               {reservasCount}
             </span>
             <span className="text-[10px] text-[#8C9287] dark:text-[#9EA399] uppercase tracking-wider">
-              Reservas
+              {t("profile.bookings")}
             </span>
           </button>
 
@@ -279,13 +292,15 @@ export default function PerfilPortal({
               {favoritasList.length}
             </span>
             <span className="text-[10px] text-[#8C9287] dark:text-[#9EA399] uppercase tracking-wider">
-              Favoritos
+              {t("profile.favorites")}
             </span>
           </button>
         </div>
 
-        {/* Mis intereses */}
-        <h3 className="font-serif text-xl text-[#1E201D] dark:text-white mb-4">Mis intereses</h3>
+        {/* Interests */}
+        <h3 className="font-serif text-xl text-[#1E201D] dark:text-white mb-4">
+          {t("profile.myInterests")}
+        </h3>
         <div className="flex flex-wrap gap-2 mb-4">
           {intereses.map((item, idx) => (
             <button
@@ -327,20 +342,20 @@ export default function PerfilPortal({
               <input
                 value={nuevoInteres}
                 onChange={(e) => setNuevoInteres(e.target.value)}
-                placeholder="Añadir interés (ej. Senderismo)"
+                placeholder={t("profile.addInterestPlaceholder")}
                 className="flex-1 bg-white dark:bg-[#2A312C] rounded-xl px-3 h-10 text-xs"
               />
               <button
                 type="submit"
                 className="bg-[#728C69] text-white text-xs px-4 rounded-xl font-medium"
               >
-                Agregar
+                {t("common.add")}
               </button>
             </form>
 
             <div>
               <h4 className="text-xs font-semibold text-[#63665E] dark:text-[#A5B29A] mb-2">
-                Necesidades de accesibilidad
+                {t("profile.accessNeeds")}
               </h4>
               <div className="flex flex-wrap gap-2 mb-2">
                 {accessibilityNeeds.map((need, idx) => (
@@ -369,23 +384,23 @@ export default function PerfilPortal({
                 <input
                   value={nuevaAccesibilidad}
                   onChange={(e) => setNuevaAccesibilidad(e.target.value)}
-                  placeholder="Ej. Rampas, señalética braille..."
+                  placeholder={t("profile.accessNeedsPlaceholder")}
                   className="flex-1 bg-white dark:bg-[#2A312C] rounded-xl px-3 h-10 text-xs"
                 />
                 <button
                   type="submit"
                   className="bg-[#728C69] text-white text-xs px-4 rounded-xl font-medium"
                 >
-                  Agregar
+                  {t("common.add")}
                 </button>
               </form>
             </div>
           </div>
         )}
 
-        {/* Experiencias y Exploración */}
+        {/* Experiences & Exploration */}
         <h3 className="font-serif text-xl text-[#1E201D] dark:text-white mb-4 mt-4">
-          Experiencias y Exploración
+          {t("profile.expSection")}
         </h3>
         <div className="flex flex-col gap-3 mb-8">
           <button
@@ -397,7 +412,7 @@ export default function PerfilPortal({
                 <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
               </svg>
               <span className="text-sm font-medium">
-                Mis Favoritos ({favoritasList.length})
+                {t("profile.myFavoritesCount", { count: favoritasList.length })}
               </span>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8C9287" strokeWidth="2">
@@ -416,10 +431,8 @@ export default function PerfilPortal({
                 </svg>
               </div>
               <div>
-                <span className="text-sm font-semibold block">Recomendaciones con IA</span>
-                <span className="text-[11px] text-[#8C9287]">
-                  Itinerarios personalizados en CDMX
-                </span>
+                <span className="text-sm font-semibold block">{t("profile.aiRecs")}</span>
+                <span className="text-[11px] text-[#8C9287]">{t("profile.aiRecsSub")}</span>
               </div>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8C9287" strokeWidth="2">
@@ -441,9 +454,9 @@ export default function PerfilPortal({
                 </svg>
               </div>
               <div>
-                <span className="text-sm font-semibold block">Mis Reservas</span>
+                <span className="text-sm font-semibold block">{t("profile.myBookings")}</span>
                 <span className="text-[11px] text-[#8C9287]">
-                  {reservasCount} actividades registradas
+                  {t("profile.myBookingsSub", { count: reservasCount })}
                 </span>
               </div>
             </div>
@@ -463,7 +476,7 @@ export default function PerfilPortal({
                 <line x1="21" x2="9" y1="12" y2="12" />
               </svg>
               <span className="text-sm font-medium text-[#C81D77] dark:text-[#E24A96]">
-                Cerrar sesión
+                {t("header.signOut")}
               </span>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8C9287" strokeWidth="2">

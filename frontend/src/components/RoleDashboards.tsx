@@ -19,6 +19,8 @@ import {
   Send,
 } from "lucide-react";
 import { apiFetch, getUserSession } from "../api/client";
+import { useLanguage } from "../i18n/LanguageContext";
+import ProviderMonitoring from "./ProviderMonitoring";
 
 const ALCALDIAS_COORDS: Record<string, { lat: number; lng: number }> = {
   "Alvaro Obregon": { lat: 19.3587, lng: -99.2033 },
@@ -42,37 +44,39 @@ const ALCALDIAS_COORDS: Record<string, { lat: number; lng: number }> = {
 const ALCALDIAS_CDMX = Object.keys(ALCALDIAS_COORDS);
 
 const CATEGORIAS_CATALOGO = [
-  { value: "Naturaleza", label: "Naturaleza" },
-  { value: "Gastronomia", label: "Gastronomía" },
-  { value: "Cultura", label: "Cultura" },
-  { value: "Viajes Tranquilos", label: "Relax / Viajes Tranquilos" },
+  "Naturaleza",
+  "Gastronomia",
+  "Cultura",
+  "Viajes Tranquilos",
 ];
 
 // ============================================================================
-// 1. PANEL DE PROVEEDOR (MI CUENTA + CREAR ACTIVIDAD + ESTADO REAL EN BD)
+// 1. PROVIDER PORTAL (ACCOUNT + MONITORING + CREATE ACTIVITY + AUDITS + CHAT)
 // ============================================================================
 interface ProviderPortalProps {
   session: { token: string | null; role: string | null; name: string | null };
-  initialTab?: "cuenta" | "resumen" | "evidencias" | "nuevaExp" | "mensajes";
+  initialTab?: "cuenta" | "monitoreo" | "resumen" | "evidencias" | "nuevaExp" | "mensajes";
   onCatalogUpdated: () => void;
-  onNavigateReservas: () => void;
+  onNavigateReservas?: () => void;
 }
 
 export function ProviderPortal({
   session,
   initialTab = "cuenta",
   onCatalogUpdated,
-  onNavigateReservas,
 }: ProviderPortalProps) {
-  const [activeTab, setActiveTab] = useState<"cuenta" | "solicitudes" | "nuevaExp" | "mensajes">(
-    initialTab === "cuenta"
-      ? "cuenta"
-      : initialTab === "resumen"
-      ? "solicitudes"
-      : initialTab === "mensajes"
-      ? "mensajes"
-      : "nuevaExp"
-  );
+  const { t, formatCategory, formatStatus } = useLanguage();
+  const resolveTab = (tab: ProviderPortalProps["initialTab"]) => {
+    if (tab === "cuenta") return "cuenta";
+    if (tab === "monitoreo") return "monitoreo";
+    if (tab === "resumen") return "solicitudes";
+    if (tab === "mensajes") return "mensajes";
+    return "nuevaExp";
+  };
+
+  const [activeTab, setActiveTab] = useState<
+    "cuenta" | "monitoreo" | "solicitudes" | "nuevaExp" | "mensajes"
+  >(() => resolveTab(initialTab));
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(
     null
   );
@@ -83,18 +87,21 @@ export function ProviderPortal({
   const [createdAuditId, setCreatedAuditId] = useState<number | null>(null);
   const evidenceInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Mensajes de turistas (social-chat)
+  // Tourist messages (social-chat)
   const [conversations, setConversations] = useState<any[]>([]);
   const [loadingConvs, setLoadingConvs] = useState(false);
   const [convsError, setConvsError] = useState("");
-  const [selectedConv, setSelectedConv] = useState<{ experienceId: number; otherUserId: number } | null>(null);
+  const [selectedConv, setSelectedConv] = useState<{
+    experienceId: number;
+    otherUserId: number;
+  } | null>(null);
   const [convMessages, setConvMessages] = useState<any[]>([]);
   const [replyText, setReplyText] = useState("");
   const [replySending, setReplySending] = useState(false);
   const [replyError, setReplyError] = useState("");
 
-  // Formulario unificado: Datos de Actividad + Evidencias Ambientales
-  const [businessName, setBusinessName] = useState(session.name || "Cooperativa Sustentable CDMX");
+  // Unified form: Activity data + Environmental Evidence
+  const [businessName, setBusinessName] = useState(session.name || t("provider.defaultBiz"));
   const [expTitulo, setExpTitulo] = useState("");
   const [expDesc, setExpDesc] = useState("");
   const [expCategoria, setExpCategoria] = useState("Naturaleza");
@@ -102,9 +109,7 @@ export function ProviderPortal({
   const [expPrecio, setExpPrecio] = useState(650);
   const [expDuracion, setExpDuracion] = useState(180);
   const [expCapacidad, setExpCapacidad] = useState(10);
-  const [expPracticas, setExpPracticas] = useState(
-    "Cero plásticos de un solo uso, energía solar y conservación de suelo."
-  );
+  const [expPracticas, setExpPracticas] = useState(() => t("provider.defaultPractices"));
   const [petFriendly, setPetFriendly] = useState(true);
   const [accessible, setAccessible] = useState(true);
   const [evidenceFiles, setEvidenceFiles] = useState<FileList | null>(null);
@@ -116,7 +121,7 @@ export function ProviderPortal({
       const list = await apiFetch<any[]>("/api/catalog/audits/my-audits");
       setMyAudits(Array.isArray(list) ? list : []);
     } catch (err: any) {
-      setAuditsError(err.message || "Error al consultar tus solicitudes de auditoría.");
+      setAuditsError(err.message || t("provider.auditsLoadError"));
       setMyAudits([]);
     } finally {
       setLoadingAudits(false);
@@ -131,7 +136,7 @@ export function ProviderPortal({
       const list = Array.isArray(data) ? data : data?.conversations || [];
       setConversations(list);
     } catch (err: any) {
-      setConvsError(err.message || "Error al cargar conversaciones.");
+      setConvsError(err.message || t("provider.convsLoadError"));
       setConversations([]);
     } finally {
       setLoadingConvs(false);
@@ -144,7 +149,7 @@ export function ProviderPortal({
       const data = await apiFetch<any>(`/api/social/chat/history/${experienceId}/${otherUserId}`);
       setConvMessages(Array.isArray(data) ? data : data?.messages || []);
     } catch (err: any) {
-      setReplyError(err.message || "No se pudo cargar el historial del chat.");
+      setReplyError(err.message || t("provider.chatLoadError"));
       setConvMessages([]);
     }
   };
@@ -167,17 +172,14 @@ export function ProviderPortal({
       await loadConversationHistory(selectedConv.experienceId, selectedConv.otherUserId);
       await loadConversations();
     } catch (err: any) {
-      setReplyError(err.message || "Error al enviar la respuesta.");
+      setReplyError(err.message || t("provider.replySendError"));
     } finally {
       setReplySending(false);
     }
   };
 
   useEffect(() => {
-    if (initialTab === "cuenta") setActiveTab("cuenta");
-    else if (initialTab === "resumen") setActiveTab("solicitudes");
-    else if (initialTab === "mensajes") setActiveTab("mensajes");
-    else setActiveTab("nuevaExp");
+    setActiveTab(resolveTab(initialTab));
   }, [initialTab]);
 
   useEffect(() => {
@@ -185,7 +187,7 @@ export function ProviderPortal({
   }, [session.token]);
 
   useEffect(() => {
-    if (activeTab === "solicitudes") {
+    if (activeTab === "solicitudes" || activeTab === "monitoreo") {
       loadMyAudits();
     }
     if (activeTab === "mensajes") {
@@ -204,19 +206,34 @@ export function ProviderPortal({
       const practicasTrim = expPracticas.trim();
 
       if (tituloTrim.length < 5) {
-        throw new Error("El título debe tener al menos 5 caracteres válidos (sin solo espacios).");
+        throw new Error(t("provider.errTitle"));
       }
       if (descTrim.length < 20) {
-        throw new Error("La descripción debe tener al menos 20 caracteres válidos.");
+        throw new Error(t("provider.errDesc"));
       }
       if (practicasTrim.length < 10) {
-        throw new Error("Describe tus prácticas sustentables en al menos 10 caracteres.");
+        throw new Error(t("provider.errPractices"));
       }
       if (!createdAuditId && (!evidenceFiles || evidenceFiles.length === 0)) {
-        throw new Error("Debes adjuntar al menos un archivo de evidencia ecológica (PDF o imagen).");
+        throw new Error(t("provider.errEvidence"));
+      }
+      if (!createdAuditId && evidenceFiles) {
+        if (evidenceFiles.length > 10) {
+          throw new Error(t("provider.errMaxFiles"));
+        }
+        const allowedExts = new Set(["pdf", "jpg", "jpeg", "png", "webp"]);
+        const maxBytes = 10 * 1024 * 1024;
+        for (const file of Array.from(evidenceFiles)) {
+          const ext = file.name.split(".").pop()?.toLowerCase() || "";
+          if (!allowedExts.has(ext)) {
+            throw new Error(t("provider.errFileExt", { name: file.name }));
+          }
+          if (file.size > maxBytes) {
+            throw new Error(t("provider.errFileTooLarge", { name: file.name }));
+          }
+        }
       }
 
-      // 1. Subir evidencias y generar solicitud de auditoría PENDING (si no se creó ya en un intento previo)
       let auditId = createdAuditId;
       if (!auditId) {
         const fd = new FormData();
@@ -238,7 +255,6 @@ export function ProviderPortal({
 
       const coords = ALCALDIAS_COORDS[expAlcaldia] || { lat: 19.4326, lng: -99.1332 };
 
-      // 2. Registrar la actividad en PostGIS como INACTIVA (is_active=False) hasta aprobación del Admin
       await apiFetch<any>("/api/catalog/experiences/", {
         method: "POST",
         body: JSON.stringify({
@@ -260,7 +276,11 @@ export function ProviderPortal({
       const filesCount = evidenceFiles?.length || 1;
       setFeedback({
         type: "success",
-        text: `¡Actividad "${tituloTrim}" y ${filesCount} evidencia(s) enviadas! Quedó registrada en Auditoría #${auditId} y aparecerá en el catálogo público en cuanto un Administrador la apruebe.`,
+        text: t("provider.submitSuccess", {
+          title: tituloTrim,
+          files: filesCount,
+          id: auditId ?? "",
+        }),
       });
       setCreatedAuditId(null);
       setExpTitulo("");
@@ -282,26 +302,27 @@ export function ProviderPortal({
   return (
     <main className="flex-1 w-full bg-[#F4F1EA] dark:bg-[#18201C] transition-colors duration-300 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
-        <div className="flex flex-wrap bg-[#E3E5D8] dark:bg-[#2A312C] p-1 rounded-xl mb-8 max-w-2xl">
+        <div className="flex flex-wrap bg-[#E3E5D8] dark:bg-[#2A312C] p-1 rounded-xl mb-8 max-w-3xl">
           {[
-            { id: "cuenta", label: "Mi Cuenta" },
-            { id: "nuevaExp", label: "+ Nueva Actividad y Evidencias" },
-            { id: "solicitudes", label: `Mis Solicitudes (${myAudits.length})` },
-            { id: "mensajes", label: "Mensajes" },
-          ].map((t) => (
+            { id: "cuenta", label: t("provider.tabAccount") },
+            { id: "monitoreo", label: t("provider.tabMonitoring") },
+            { id: "nuevaExp", label: t("provider.tabNew") },
+            { id: "solicitudes", label: t("provider.tabAudits", { count: myAudits.length }) },
+            { id: "mensajes", label: t("provider.tabMessages") },
+          ].map((tab) => (
             <button
-              key={t.id}
+              key={tab.id}
               onClick={() => {
                 setFeedback(null);
-                setActiveTab(t.id as any);
+                setActiveTab(tab.id as any);
               }}
-              className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all ${
-                activeTab === t.id
+              className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all whitespace-nowrap ${
+                activeTab === tab.id
                   ? "bg-white dark:bg-[#3D453F] text-[#1E201D] dark:text-white shadow-sm"
                   : "text-[#63665E] dark:text-[#A5B29A]"
               }`}
             >
-              {t.label}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -318,10 +339,12 @@ export function ProviderPortal({
           </div>
         )}
 
-        {/* SUBVISTA A: MI CUENTA */}
+        {/* SUBVIEW A: MY ACCOUNT */}
         {activeTab === "cuenta" && (
           <div className="max-w-md mx-auto flex flex-col">
-            <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white mb-6">Mi cuenta</h1>
+            <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white mb-6">
+              {t("provider.accountTitle")}
+            </h1>
 
             <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] p-5 mb-6 shadow-sm border border-transparent dark:border-white/5">
               <div className="w-full h-32 bg-[#B4CBB0] rounded-xl mb-4 relative overflow-hidden">
@@ -335,12 +358,12 @@ export function ProviderPortal({
                 {businessName}
               </h2>
               <p className="text-sm text-[#8C9287] dark:text-[#9EA399] mb-2">
-                Cooperativa ecoturística verificable en Ciudad de México.
+                {t("provider.accountDesc")}
               </p>
               <div className="flex text-[10px] text-[#63665E] dark:text-[#A5B29A] gap-2 font-medium">
-                <span>Sello Verde</span>
+                <span>{t("provider.greenSeal")}</span>
                 <span>·</span>
-                <span className="uppercase">{expCategoria}</span>
+                <span className="uppercase">{formatCategory(expCategoria)}</span>
                 <span>·</span>
                 <span>{expAlcaldia}</span>
               </div>
@@ -348,10 +371,18 @@ export function ProviderPortal({
 
             <div className="flex flex-col gap-3">
               <button
+                onClick={() => setActiveTab("monitoreo")}
+                className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
+              >
+                <span className="text-base font-medium">{t("provider.actionMon")}</span>
+                <ArrowRight className="w-4 h-4 text-[#8C9287]" />
+              </button>
+
+              <button
                 onClick={() => setActiveTab("nuevaExp")}
                 className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
               >
-                <span className="text-base font-medium">Crear Actividad y Subir Evidencias</span>
+                <span className="text-base font-medium">{t("provider.actionNew")}</span>
                 <ArrowRight className="w-4 h-4 text-[#8C9287]" />
               </button>
 
@@ -359,7 +390,7 @@ export function ProviderPortal({
                 onClick={() => setActiveTab("solicitudes")}
                 className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
               >
-                <span className="text-base font-medium">Estado de mis Auditorías</span>
+                <span className="text-base font-medium">{t("provider.actionAudits")}</span>
                 <ArrowRight className="w-4 h-4 text-[#8C9287]" />
               </button>
 
@@ -367,36 +398,32 @@ export function ProviderPortal({
                 onClick={() => setActiveTab("mensajes")}
                 className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
               >
-                <span className="text-base font-medium">Mensajes de Turistas</span>
-                <ArrowRight className="w-4 h-4 text-[#8C9287]" />
-              </button>
-
-              <button
-                onClick={onNavigateReservas}
-                className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
-              >
-                <span className="text-base font-medium">Reservas</span>
+                <span className="text-base font-medium">{t("provider.actionMessages")}</span>
                 <ArrowRight className="w-4 h-4 text-[#8C9287]" />
               </button>
             </div>
           </div>
         )}
 
-        {/* SUBVISTA B: CREAR ACTIVIDAD + ADJUNTAR EVIDENCIAS EN UN SOLO PASO */}
+        {/* SUBVIEW E: MY SERVICES MONITORING */}
+        {activeTab === "monitoreo" && (
+          <ProviderMonitoring
+            audits={myAudits}
+            onCreateNew={() => setActiveTab("nuevaExp")}
+          />
+        )}
+
+        {/* SUBVIEW B: CREATE ACTIVITY + ATTACH EVIDENCE */}
         {activeTab === "nuevaExp" && (
           <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm max-w-2xl mx-auto">
-            <h2 className="text-2xl font-serif mb-1 font-bold">
-              Dar de Alta Experiencia Sustentable
-            </h2>
-            <p className="text-xs text-muted-foreground mb-6">
-              Completa los datos de tu experiencia y adjunta tus documentos o fotografías probatorias. Un Administrador revisará tu expediente antes de publicarlo en el catálogo.
-            </p>
+            <h2 className="text-2xl font-serif mb-1 font-bold">{t("provider.formTitle")}</h2>
+            <p className="text-xs text-muted-foreground mb-6">{t("provider.formSubtitle")}</p>
 
             <form onSubmit={handleCrearActividadConEvidencia} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium block mb-1">
-                    Nombre de la Cooperativa / Negocio
+                    {t("provider.fieldBizName")}
                   </label>
                   <input
                     required
@@ -409,7 +436,7 @@ export function ProviderPortal({
 
                 <div>
                   <label className="text-xs font-medium block mb-1">
-                    Título de la Actividad (mín. 5 caracteres)
+                    {t("provider.fieldTitle")}
                   </label>
                   <input
                     required
@@ -417,7 +444,7 @@ export function ProviderPortal({
                     type="text"
                     value={expTitulo}
                     onChange={(e) => setExpTitulo(e.target.value)}
-                    placeholder="ej. Amanecer en Chinampa Agroecológica"
+                    placeholder={t("provider.fieldTitlePlaceholder")}
                     className="w-full text-xs p-3 rounded-xl bg-[#F4F1EA] dark:bg-[#1E2420]"
                   />
                 </div>
@@ -425,14 +452,14 @@ export function ProviderPortal({
 
               <div>
                 <label className="text-xs font-medium block mb-1">
-                  Descripción Detallada (mín. 20 caracteres)
+                  {t("provider.fieldDesc")}
                 </label>
                 <textarea
                   required
                   minLength={20}
                   value={expDesc}
                   onChange={(e) => setExpDesc(e.target.value)}
-                  placeholder="Explica el recorrido, actividades y su aporte ambiental..."
+                  placeholder={t("provider.fieldDescPlaceholder")}
                   rows={3}
                   className="w-full text-xs p-3 rounded-xl bg-[#F4F1EA] dark:bg-[#1E2420]"
                 />
@@ -440,22 +467,26 @@ export function ProviderPortal({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium block mb-1">Categoría</label>
+                  <label className="text-xs font-medium block mb-1">
+                    {t("provider.fieldCategory")}
+                  </label>
                   <select
                     value={expCategoria}
                     onChange={(e) => setExpCategoria(e.target.value)}
                     className="w-full text-xs p-3 rounded-xl bg-[#F4F1EA] dark:bg-[#1E2420]"
                   >
-                    {CATEGORIAS_CATALOGO.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
+                    {CATEGORIAS_CATALOGO.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {formatCategory(cat)}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium block mb-1">Alcaldía CDMX</label>
+                  <label className="text-xs font-medium block mb-1">
+                    {t("provider.fieldBorough")}
+                  </label>
                   <select
                     value={expAlcaldia}
                     onChange={(e) => setExpAlcaldia(e.target.value)}
@@ -472,7 +503,9 @@ export function ProviderPortal({
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-medium block mb-1">Precio (MXN)</label>
+                  <label className="text-xs font-medium block mb-1">
+                    {t("provider.fieldPrice")}
+                  </label>
                   <input
                     required
                     type="number"
@@ -484,7 +517,9 @@ export function ProviderPortal({
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium block mb-1">Duración (min)</label>
+                  <label className="text-xs font-medium block mb-1">
+                    {t("provider.fieldDuration")}
+                  </label>
                   <input
                     required
                     type="number"
@@ -496,7 +531,9 @@ export function ProviderPortal({
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium block mb-1">Capacidad Máx (1-50)</label>
+                  <label className="text-xs font-medium block mb-1">
+                    {t("provider.fieldCapacity")}
+                  </label>
                   <input
                     required
                     type="number"
@@ -516,7 +553,7 @@ export function ProviderPortal({
                     checked={petFriendly}
                     onChange={(e) => setPetFriendly(e.target.checked)}
                   />
-                  Pet Friendly
+                  {t("common.petFriendly")}
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -524,13 +561,13 @@ export function ProviderPortal({
                     checked={accessible}
                     onChange={(e) => setAccessible(e.target.checked)}
                   />
-                  Accesible
+                  {t("common.accessible")}
                 </label>
               </div>
 
               <div>
                 <label className="text-xs font-medium block mb-1">
-                  Prácticas Sustentables (mín. 10 caracteres)
+                  {t("provider.fieldPractices")}
                 </label>
                 <input
                   required
@@ -545,11 +582,9 @@ export function ProviderPortal({
               <div className="p-4 rounded-2xl bg-[#F4F1EA] dark:bg-[#1E2420] border border-dashed border-[#728C69]/50 space-y-2">
                 <label className="text-xs font-bold flex items-center gap-1.5 text-[#3B523E] dark:text-[#A5B29A]">
                   <Paperclip className="w-4 h-4 text-[#728C69]" />
-                  Evidencias Ambientales Obligatorias (PDF, JPG, PNG)
+                  {t("provider.evidenceLabel")}
                 </label>
-                <p className="text-[11px] text-muted-foreground">
-                  Adjunta permisos ambientales, certificaciones o fotografías reales de tus instalaciones y manejo de residuos.
-                </p>
+                <p className="text-[11px] text-muted-foreground">{t("provider.evidenceHint")}</p>
                 <input
                   ref={evidenceInputRef}
                   required={!createdAuditId}
@@ -561,7 +596,7 @@ export function ProviderPortal({
                 />
                 {createdAuditId && (
                   <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                    Las evidencias ya fueron cargadas en Auditoría #{createdAuditId}. Al reenviar se registrará solo la experiencia sin duplicar auditorías.
+                    {t("provider.evidenceReused", { id: createdAuditId })}
                   </p>
                 )}
               </div>
@@ -571,25 +606,21 @@ export function ProviderPortal({
                 disabled={isSubmitting}
                 className="w-full bg-[#C81D77] hover:bg-[#A91864] text-white py-3.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
               >
-                {isSubmitting
-                  ? "Subiendo evidencias y enviando a auditoría..."
-                  : "Enviar Actividad y Evidencias a Validación"}
+                {isSubmitting ? t("provider.submittingBtn") : t("provider.submitBtn")}
               </button>
             </form>
           </div>
         )}
 
-        {/* SUBVISTA C: MIS SOLICITUDES EN AUDITORÍA */}
+        {/* SUBVIEW C: MY AUDIT SUBMISSIONS */}
         {activeTab === "solicitudes" && (
           <div className="space-y-4">
             <div className="rounded-2xl p-5 mb-6 border bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-300 flex items-start justify-between gap-3.5">
               <div className="flex items-start gap-3.5">
                 <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0 mt-0.5" />
                 <div>
-                  <h3 className="text-sm font-bold">Validación contra Greenwashing</h3>
-                  <p className="text-xs mt-1 leading-relaxed">
-                    Consulta aquí el dictamen oficial de tus actividades enviadas. Cuando un Administrador apruebe tu expediente, tu experiencia aparecerá automáticamente en el catálogo público.
-                  </p>
+                  <h3 className="text-sm font-bold">{t("provider.auditsBannerTitle")}</h3>
+                  <p className="text-xs mt-1 leading-relaxed">{t("provider.auditsBannerDesc")}</p>
                 </div>
               </div>
               <button
@@ -599,7 +630,7 @@ export function ProviderPortal({
                 className="shrink-0 inline-flex items-center gap-1.5 bg-white dark:bg-[#2A312C] text-[#1E201D] dark:text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-sm hover:bg-[#E3E5D8]"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingAudits ? "animate-spin" : ""}`} />
-                Actualizar
+                {t("common.refresh")}
               </button>
             </div>
 
@@ -610,18 +641,16 @@ export function ProviderPortal({
             )}
 
             {loadingAudits ? (
-              <p className="text-sm text-muted-foreground">Consultando estado de auditorías...</p>
+              <p className="text-sm text-muted-foreground">{t("provider.auditsLoading")}</p>
             ) : myAudits.length === 0 ? (
               <div className="p-8 text-center bg-white dark:bg-[#2A312C] rounded-2xl border border-dashed border-[#8C9287]/40">
                 <UploadCloud className="h-10 w-10 text-[#728C69] mx-auto mb-2" />
-                <p className="text-sm text-[#8C9287] mb-3">
-                  Aún no has enviado actividades con evidencias a auditoría.
-                </p>
+                <p className="text-sm text-[#8C9287] mb-3">{t("provider.auditsEmpty")}</p>
                 <button
                   onClick={() => setActiveTab("nuevaExp")}
                   className="text-xs bg-[#728C69] text-white px-4 py-2 rounded-xl font-medium"
                 >
-                  Registrar mi primera actividad
+                  {t("provider.auditsEmptyCta")}
                 </button>
               </div>
             ) : (
@@ -638,7 +667,7 @@ export function ProviderPortal({
                     >
                       <div className="flex justify-between items-start gap-2">
                         <span className="text-[10px] font-bold text-[#728C69] uppercase tracking-wider">
-                          Auditoría #{doc.id} · {doc.category}
+                          {t("provider.auditTag", { id: doc.id, cat: formatCategory(doc.category) })}
                         </span>
                         <span
                           className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
@@ -650,10 +679,10 @@ export function ProviderPortal({
                           }`}
                         >
                           {isApproved
-                            ? "APROBADA Y PUBLICADA"
+                            ? t("provider.statusApproved")
                             : isRejected
-                            ? "RECHAZADA"
-                            : "PENDIENTE DE VALIDACIÓN"}
+                            ? t("provider.statusRejected")
+                            : t("provider.statusPending")}
                         </span>
                       </div>
                       <h3 className="font-semibold text-sm">{doc.business_name}</h3>
@@ -661,7 +690,7 @@ export function ProviderPortal({
                         {doc.description}
                       </p>
                       <p className="text-[11px] text-[#8C9287]">
-                        {doc.files_count || 1} evidencia(s) adjunta(s) en RustFS/S3
+                        {t("provider.filesAttached", { count: doc.files_count || 1 })}
                       </p>
                       {doc.reviewer_notes && (
                         <div
@@ -671,7 +700,7 @@ export function ProviderPortal({
                               : "bg-[#F4F1EA] dark:bg-[#18201C] text-[#3B523E] dark:text-[#A5B29A]"
                           }`}
                         >
-                          <strong>Dictamen del Administrador:</strong> {doc.reviewer_notes}
+                          <strong>{t("provider.reviewerNotes")}</strong> {doc.reviewer_notes}
                         </div>
                       )}
                     </div>
@@ -682,14 +711,14 @@ export function ProviderPortal({
           </div>
         )}
 
-        {/* SUBVISTA D: MENSAJES DE TURISTAS */}
+        {/* SUBVIEW D: TOURIST MESSAGES */}
         {activeTab === "mensajes" && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="font-serif text-xl font-bold flex items-center gap-2">
                   <MessageSquare className="w-4 h-4 text-[#728C69]" />
-                  Conversaciones
+                  {t("provider.conversations")}
                 </h2>
                 <button
                   type="button"
@@ -698,7 +727,7 @@ export function ProviderPortal({
                   className="text-xs text-[#728C69] hover:underline flex items-center gap-1"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${loadingConvs ? "animate-spin" : ""}`} />
-                  Actualizar
+                  {t("common.refresh")}
                 </button>
               </div>
 
@@ -709,11 +738,9 @@ export function ProviderPortal({
               )}
 
               {loadingConvs ? (
-                <p className="text-xs text-muted-foreground">Cargando conversaciones...</p>
+                <p className="text-xs text-muted-foreground">{t("provider.convsLoading")}</p>
               ) : conversations.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Aún no has recibido mensajes de turistas.
-                </p>
+                <p className="text-xs text-muted-foreground">{t("provider.convsEmpty")}</p>
               ) : (
                 <div className="space-y-2">
                   {conversations.map((c: any, idx: number) => {
@@ -737,11 +764,9 @@ export function ProviderPortal({
                         }`}
                       >
                         <div className="font-bold">
-                          Turista #{otherId} · Exp #{expId}
+                          {t("provider.convLabel", { tourist: otherId, exp: expId })}
                         </div>
-                        {preview && (
-                          <p className="truncate opacity-80 mt-0.5">{preview}</p>
-                        )}
+                        {preview && <p className="truncate opacity-80 mt-0.5">{preview}</p>}
                       </button>
                     );
                   })}
@@ -752,17 +777,20 @@ export function ProviderPortal({
             <div className="md:col-span-2 bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm flex flex-col justify-between min-h-[340px]">
               {!selectedConv ? (
                 <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground text-center">
-                  Selecciona una conversación para leer el historial y responder al turista.
+                  {t("provider.selectConv")}
                 </div>
               ) : (
                 <>
                   <div>
                     <h3 className="font-serif text-lg font-bold mb-3">
-                      Chat con Turista #{selectedConv.otherUserId} · Experiencia #{selectedConv.experienceId}
+                      {t("provider.chatHeader", {
+                        tourist: selectedConv.otherUserId,
+                        exp: selectedConv.experienceId,
+                      })}
                     </h3>
                     <div className="bg-[#F4F1EA] dark:bg-[#18201C] rounded-2xl p-4 max-h-64 overflow-y-auto space-y-2 mb-4">
                       {convMessages.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">Sin mensajes en esta conversación.</p>
+                        <p className="text-xs text-muted-foreground">{t("provider.chatNoMsgs")}</p>
                       ) : (
                         convMessages.map((m: any, idx: number) => (
                           <div
@@ -770,7 +798,9 @@ export function ProviderPortal({
                             className="bg-white dark:bg-[#2A312C] rounded-xl p-2.5 text-xs"
                           >
                             <span className="font-bold text-[#728C69] block mb-0.5">
-                              {m.senderRole === "PROVIDER" ? "Tú (Cooperativa)" : `Turista #${m.senderId}`}
+                              {m.senderRole === "PROVIDER"
+                                ? t("provider.youCoop")
+                                : t("detail.touristLabel", { id: m.senderId })}
                             </span>
                             <span>{m.content}</span>
                           </div>
@@ -779,16 +809,14 @@ export function ProviderPortal({
                     </div>
                   </div>
 
-                  {replyError && (
-                    <p className="text-xs text-red-600 mb-2">{replyError}</p>
-                  )}
+                  {replyError && <p className="text-xs text-red-600 mb-2">{replyError}</p>}
 
                   <form onSubmit={handleSendReply} className="flex gap-2">
                     <input
                       required
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
-                      placeholder="Escribe tu respuesta para el turista..."
+                      placeholder={t("provider.replyPlaceholder")}
                       className="flex-1 bg-[#F4F1EA] dark:bg-[#18201C] rounded-xl px-3 h-10 text-xs"
                     />
                     <button
@@ -797,7 +825,7 @@ export function ProviderPortal({
                       className="bg-[#C81D77] hover:bg-[#A91864] text-white px-4 rounded-xl text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      {replySending ? "Enviando..." : "Responder"}
+                      {replySending ? t("common.sending") : t("provider.replyBtn")}
                     </button>
                   </form>
                 </>
@@ -811,13 +839,14 @@ export function ProviderPortal({
 }
 
 // ============================================================================
-// 2. PANEL DE ADMINISTRADOR (AUDITORÍAS PENDIENTES -> ABRIR ARCHIVO + APROBAR)
+// 2. ADMIN AUDITS PORTAL
 // ============================================================================
 interface AdminAuditsPortalProps {
   onCatalogUpdated?: () => void;
 }
 
 export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) {
+  const { t, formatCategory, formatStatus } = useLanguage();
   const [audits, setAudits] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -826,7 +855,10 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
   const [retroalimentacion, setRetroalimentacion] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [openingFileId, setOpeningFileId] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   const fetchAuditorias = async () => {
     setIsLoading(true);
@@ -835,7 +867,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
       const data = await apiFetch<any[]>("/api/catalog/audits/pending");
       setAudits(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      setLoadError(err.message || "No se pudieron cargar las auditorías pendientes.");
+      setLoadError(err.message || t("audits.loading"));
       setAudits([]);
     } finally {
       setIsLoading(false);
@@ -854,7 +886,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) {
-        throw new Error("No se pudo abrir el archivo de evidencia");
+        throw new Error("Could not open evidence file");
       }
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
@@ -879,9 +911,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
           decision,
           reviewer_notes:
             retroalimentacion.trim() ||
-            (decision === "APPROVED"
-              ? "Evidencias ambientales aprobadas y experiencia publicada."
-              : "No cumple con los criterios ecológicos de CDMX."),
+            (decision === "APPROVED" ? t("audits.defaultApproved") : t("audits.defaultRejected")),
         }),
       });
 
@@ -889,8 +919,8 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
         type: "success",
         text:
           decision === "APPROVED"
-            ? `Auditoría #${selectedAudit.id} APROBADA. La actividad ya es visible en el catálogo público.`
-            : `Auditoría #${selectedAudit.id} RECHAZADA.`,
+            ? t("audits.approvedMsg", { id: selectedAudit.id })
+            : t("audits.rejectedMsg", { id: selectedAudit.id }),
       });
 
       if (onCatalogUpdated) onCatalogUpdated();
@@ -924,9 +954,9 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div>
-              <h1 className="font-serif text-3xl font-bold">Dictamen de Sustentabilidad</h1>
+              <h1 className="font-serif text-3xl font-bold">{t("audits.backTitle")}</h1>
               <p className="text-xs text-[#63665E] dark:text-[#A5B29A]">
-                Verificación documental y probatoria ecológica · Expediente #{selectedAudit.id}
+                {t("audits.backSub", { id: selectedAudit.id })}
               </p>
             </div>
           </div>
@@ -952,15 +982,17 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                   <polygon points="100,120 280,70 450,120" fill="#586E52" />
                 </svg>
                 <span className="absolute top-3 right-3 bg-white/90 text-[10px] font-bold px-2.5 py-1 rounded-full text-[#1E201D]">
-                  {selectedAudit.status || "PENDING"}
+                  {formatStatus(selectedAudit.status || "PENDING")}
                 </span>
               </div>
 
               <div className="flex items-center gap-2 mb-2 text-xs">
-                <span className="font-bold text-[#728C69] uppercase">{selectedAudit.category}</span>
+                <span className="font-bold text-[#728C69] uppercase">
+                  {formatCategory(selectedAudit.category)}
+                </span>
                 <span>·</span>
                 <span className="flex items-center gap-1 text-muted-foreground">
-                  <MapPin className="w-3 h-3" /> CDMX
+                  <MapPin className="w-3 h-3" /> {t("common.cdmx")}
                 </span>
               </div>
 
@@ -974,16 +1006,14 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
               <div className="pt-4 border-t border-border text-xs text-muted-foreground space-y-1">
                 <div className="flex items-center gap-1.5 text-foreground font-medium">
                   <User className="w-3.5 h-3.5 text-[#728C69]" />
-                  Proveedor ID: #{selectedAudit.provider_id}
+                  {t("audits.providerId", { id: selectedAudit.provider_id })}
                 </div>
               </div>
             </div>
 
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm space-y-3">
-                <h3 className="font-serif text-xl font-bold">
-                  Evidencias almacenadas en RustFS / MinIO
-                </h3>
+                <h3 className="font-serif text-xl font-bold">{t("audits.evidenceTitle")}</h3>
                 {Array.isArray(selectedAudit.files) && selectedAudit.files.length > 0 ? (
                   selectedAudit.files.map((f: any) => (
                     <div
@@ -997,7 +1027,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                         <div>
                           <h4 className="text-xs font-bold">{f.file_name}</h4>
                           <span className="text-[10px] text-muted-foreground">
-                            Tipo: {f.file_type} · Almacenado en S3/RustFS
+                            {t("audits.fileType", { type: f.file_type })}
                           </span>
                         </div>
                       </div>
@@ -1008,7 +1038,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                         className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-[#728C69] hover:bg-[#5B7153] text-white px-3.5 py-2 rounded-xl transition-colors"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
-                        {openingFileId === f.id ? "Abriendo..." : "Abrir archivo"}
+                        {openingFileId === f.id ? t("audits.openingFile") : t("audits.openFile")}
                       </button>
                     </div>
                   ))
@@ -1016,22 +1046,20 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                   <div className="p-5 rounded-2xl bg-[#F4F1EA] dark:bg-[#18201C] border border-[#728C69]/20 flex items-center gap-3.5">
                     <FileText className="w-5 h-5 text-[#728C69]" />
                     <span className="text-xs">
-                      Expediente Ambiental #{selectedAudit.id} adjunto en S3/RustFS.
+                      {t("audits.fallbackFile", { id: selectedAudit.id })}
                     </span>
                   </div>
                 )}
               </div>
 
               <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm">
-                <h3 className="font-serif text-lg font-bold mb-2">
-                  Observaciones y Retroalimentación Técnica
-                </h3>
+                <h3 className="font-serif text-lg font-bold mb-2">{t("audits.notesTitle")}</h3>
                 <textarea
                   value={retroalimentacion}
                   onChange={(e) => setRetroalimentacion(e.target.value)}
-                  placeholder="Escribe el dictamen técnico para el proveedor..."
+                  placeholder={t("audits.notesPlaceholder")}
                   rows={3}
-                  className="w-full text-xs p-3 rounded-xl bg-[#F4F1EA] dark:bg-[#18201C]"
+                  className="w-full text-xs p-3 rounded-xl bg-[#F4F1EA] dark:bg-[#1E2420]"
                 />
               </div>
             </div>
@@ -1044,7 +1072,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
               className="w-full max-w-xs bg-[#C81D77] hover:bg-[#A91864] text-white font-semibold rounded-2xl py-3.5 text-sm transition-colors flex items-center justify-center gap-2"
             >
               <XCircle className="w-4 h-4" />
-              {isSubmitting ? "Procesando..." : "Rechazar Solicitud"}
+              {isSubmitting ? t("common.processing") : t("audits.reject")}
             </button>
             <button
               disabled={isSubmitting}
@@ -1052,7 +1080,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
               className="w-full max-w-xs bg-[#728C69] hover:bg-[#5B7153] text-white font-semibold rounded-2xl py-3.5 text-sm transition-colors flex items-center justify-center gap-2"
             >
               <CheckCircle2 className="w-4 h-4" />
-              {isSubmitting ? "Procesando..." : "Aprobar y Publicar"}
+              {isSubmitting ? t("common.processing") : t("audits.approve")}
             </button>
           </div>
         </div>
@@ -1061,8 +1089,8 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
   }
 
   const categorias = [
-    { value: "Todos", label: "Todos" },
-    ...CATEGORIAS_CATALOGO,
+    { value: "Todos", label: t("audits.catAll") },
+    ...CATEGORIAS_CATALOGO.map((cat) => ({ value: cat, label: formatCategory(cat) })),
   ];
   const filtrados = audits.filter((a) =>
     selectedCategory === "Todos"
@@ -1074,17 +1102,15 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
     <main className="flex-1 w-full bg-[#F4F1EA] dark:bg-[#18201C] transition-colors duration-300 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-3xl font-serif mb-2 font-bold">Auditorías de Actividades y Evidencias</h1>
-          <p className="text-sm text-[#63665E] dark:text-[#A5B29A]">
-            Revisa las evidencias ambientales adjuntas por los proveedores. Al aprobar una solicitud, su actividad se publica automáticamente en el catálogo.
-          </p>
+          <h1 className="text-3xl font-serif mb-2 font-bold">{t("audits.listTitle")}</h1>
+          <p className="text-sm text-[#63665E] dark:text-[#A5B29A]">{t("audits.listSub")}</p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3 mb-8">
           <div className="rounded-2xl bg-white dark:bg-[#2A312C] p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-[#8C9287] uppercase tracking-wider">
-                Expedientes por Auditar
+                {t("audits.statPending")}
               </span>
               <Clock className="h-5 w-5 text-amber-500" />
             </div>
@@ -1096,7 +1122,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
           <div className="rounded-2xl bg-white dark:bg-[#2A312C] p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-[#8C9287] uppercase tracking-wider">
-                Almacenamiento Verificable
+                {t("audits.statStorage")}
               </span>
               <ShieldAlert className="h-5 w-5 text-[#C81D77]" />
             </div>
@@ -1106,11 +1132,13 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
           <div className="rounded-2xl bg-white dark:bg-[#2A312C] p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-[#8C9287] uppercase tracking-wider">
-                Criterios de Validación
+                {t("audits.statCriteria")}
               </span>
               <CheckCircle2 className="h-5 w-5 text-[#728C69]" />
             </div>
-            <p className="text-2xl font-serif text-[#728C69] mt-2 font-bold">100% CDMX</p>
+            <p className="text-2xl font-serif text-[#728C69] mt-2 font-bold">
+              100% {t("common.cdmx")}
+            </p>
           </div>
         </div>
 
@@ -1137,13 +1165,11 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
         )}
 
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Cargando auditorías pendientes...</p>
+          <p className="text-sm text-muted-foreground">{t("audits.loading")}</p>
         ) : filtrados.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-gray-300 dark:border-white/10 p-12 text-center bg-white dark:bg-[#2A312C]">
             <ShieldCheck className="w-10 h-10 text-[#728C69] mx-auto mb-2" />
-            <p className="text-[#8C9287] text-sm">
-              No hay evidencias pendientes en la categoría seleccionada.
-            </p>
+            <p className="text-[#8C9287] text-sm">{t("audits.empty")}</p>
           </div>
         ) : (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -1160,17 +1186,17 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                       <polygon points="100,120 280,70 450,120" fill="#586E52" />
                     </svg>
                     <span className="absolute top-3 right-3 bg-white/90 text-[10px] font-bold px-2.5 py-1 rounded-full text-[#1E201D]">
-                      {audit.files?.length || 1} evidencia(s)
+                      {t("audits.evCount", { count: audit.files?.length || 1 })}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[10px] font-bold text-[#728C69] uppercase tracking-wider">
-                      {audit.category}
+                      {formatCategory(audit.category)}
                     </span>
                     <span>·</span>
                     <span className="text-[10px] text-amber-600 font-semibold">
-                      Expediente #{audit.id}
+                      {t("audits.caseNum", { id: audit.id })}
                     </span>
                   </div>
 
@@ -1182,13 +1208,13 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
 
                 <div className="pt-4 border-t border-border flex items-center justify-between">
                   <span className="text-[11px] text-[#8C9287]">
-                    Proveedor #{audit.provider_id}
+                    {t("audits.providerNum", { id: audit.provider_id })}
                   </span>
                   <button
                     onClick={() => setSelectedAudit(audit)}
                     className="inline-flex items-center gap-1.5 bg-[#C81D77] hover:bg-[#A91864] text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm"
                   >
-                    Revisar
+                    {t("audits.review")}
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>

@@ -90,6 +90,9 @@ export async function apiFetch<T = any>(
     if (res.status === 401) {
       clearUserSession();
     }
+    if (res.status === 413) {
+      throw new Error("Los archivos superan el tamaño máximo permitido (máx. 10 MB por archivo).");
+    }
     const msg = Array.isArray(data.detail)
       ? data.detail[0]?.msg || "Error de validación"
       : data.detail || `Error ${res.status}`;
