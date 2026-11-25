@@ -11,9 +11,8 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"TOURIST" | "PROVIDER" | "ADMIN">("TOURIST");
+  const [role, setRole] = useState<"TOURIST" | "PROVIDER">("TOURIST");
   const [businessName, setBusinessName] = useState("");
   const [rfc, setRfc] = useState("");
   const [error, setError] = useState(initialError);
@@ -22,12 +21,16 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError("");
     setSuccess("");
     setLoading(true);
 
     try {
       if (mode === "register") {
+        if (password.length < 8 || password.length > 72) {
+          throw new Error("La contraseña debe tener entre 8 y 72 caracteres.");
+        }
         const payload: Record<string, any> = {
           email: email.trim(),
           password,
@@ -48,7 +51,10 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
         saveUserSession(res.access_token, res.role, name.trim() || email.trim());
         setSuccess("Cuenta creada correctamente. Redirigiendo...");
-        setTimeout(onSuccess, 500);
+        setTimeout(() => {
+          onSuccess();
+        }, 500);
+        return;
       } else {
         const res = await apiFetch<any>("/api/auth/users/login", {
           method: "POST",
@@ -60,10 +66,10 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
         saveUserSession(res.access_token, res.role, email.trim());
         onSuccess();
+        return;
       }
     } catch (err: any) {
       setError(err.message);
-    } finally {
       setLoading(false);
     }
   };
@@ -149,12 +155,11 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
                 <select
                   disabled={loading}
                   value={role}
-                  onChange={(e) => setRole(e.target.value as any)}
+                  onChange={(e) => setRole(e.target.value as "TOURIST" | "PROVIDER")}
                   className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
                 >
                   <option value="TOURIST">Turista</option>
                   <option value="PROVIDER">Proveedor / Cooperativa</option>
-                  <option value="ADMIN">Administrador</option>
                 </select>
               </div>
 
@@ -207,31 +212,16 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
             />
           </div>
 
-          {mode === "register" && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-                Teléfono
-              </label>
-              <input
-                disabled={loading}
-                type="tel"
-                placeholder="Ej. 55 1234 5678"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white placeholder-[#8C9287] rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
-              />
-            </div>
-          )}
-
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-              Contraseña {mode === "register" && "(mín. 12 caracteres, mayúscula, número y símbolo)"}
+              Contraseña {mode === "register" && "(8 a 72 caracteres)"}
             </label>
             <input
               required
               disabled={loading}
               type="password"
-              minLength={mode === "register" ? 12 : 6}
+              minLength={mode === "register" ? 8 : 6}
+              maxLength={72}
               placeholder={mode === "register" ? "Ej. Password123!" : "••••••••"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}

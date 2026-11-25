@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from src.config.database import Base
 
@@ -13,11 +13,12 @@ class Booking(Base):
     activity_date = Column(Date, index=True, nullable=False)
     guests_count = Column(Integer, nullable=False)
     accessibility_notes = Column(Text, nullable=True)
-    base_amount = Column(Float, nullable=False)
-    impact_contribution = Column(Float, nullable=False)
-    total_amount = Column(Float, nullable=False)
+    base_amount = Column(Numeric(10, 2, asdecimal=False), nullable=False)
+    impact_contribution = Column(Numeric(10, 2, asdecimal=False), nullable=False)
+    total_amount = Column(Numeric(10, 2, asdecimal=False), nullable=False)
     status = Column(String(30), default="PENDING_PAYMENT", index=True)
     access_code = Column(String(32), unique=True, nullable=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -28,7 +29,7 @@ class PaymentTransaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     booking_id = Column(Integer, ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
     payment_method = Column(String(50), nullable=False)
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(10, 2, asdecimal=False), nullable=False)
     status = Column(String(20), nullable=False)
     gateway_reference = Column(String(120), nullable=True)
     failure_reason = Column(String(255), nullable=True)
@@ -37,6 +38,9 @@ class PaymentTransaction(Base):
 
 class FavoriteExperience(Base):
     __tablename__ = "favorite_experiences"
+    __table_args__ = (
+        UniqueConstraint("tourist_id", "experience_id", name="uq_favorite_tourist_exp"),
+    )
 
     # Guardar experiencias marcadas como favoritas por el turista
     id = Column(Integer, primary_key=True, index=True)

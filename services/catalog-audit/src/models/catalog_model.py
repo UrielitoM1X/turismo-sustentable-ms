@@ -38,6 +38,7 @@ class Experience(Base):
     # Definir experiencia turistica sustentable restringida a CDMX
     id = Column(Integer, primary_key=True, index=True)
     provider_id = Column(Integer, index=True, nullable=False)
+    audit_id = Column(Integer, ForeignKey("sustainability_audits.id"), nullable=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
     category = Column(String(50), index=True, nullable=False)

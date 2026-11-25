@@ -11,6 +11,7 @@ export interface ActividadItem {
   sustainable_practices?: string;
   pet_friendly?: boolean;
   accessible?: boolean;
+  average_rating?: number;
 }
 
 interface TarjetaActividadProps {
@@ -19,6 +20,7 @@ interface TarjetaActividadProps {
   onToggleFavorite: (id: number) => void;
   onReservar: (actividad: ActividadItem) => void;
   onVerDetalle: (actividad: ActividadItem) => void;
+  canReserve?: boolean;
 }
 
 export default function TarjetaActividad({
@@ -27,6 +29,7 @@ export default function TarjetaActividad({
   onToggleFavorite,
   onReservar,
   onVerDetalle,
+  canReserve = true,
 }: TarjetaActividadProps) {
   const formattedPrecio = `$${Number(actividad.price).toLocaleString("es-MX")}`;
 
@@ -94,11 +97,21 @@ export default function TarjetaActividad({
             <h3 className="font-serif text-xl text-[#1E201D] dark:text-white leading-tight flex-1 pr-2 line-clamp-2">
               {actividad.title}
             </h3>
-            <div className="flex items-center gap-1 text-[#D98A5F] flex-shrink-0 bg-[#F4F1EA] dark:bg-[#18201C] px-2 py-1 rounded-md">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
-              <span className="text-xs font-bold text-[#1E201D] dark:text-white">4.9</span>
+            <div className="flex items-center gap-1 text-[#728C69] flex-shrink-0 bg-[#F4F1EA] dark:bg-[#18201C] px-2 py-1 rounded-md">
+              {typeof actividad.average_rating === "number" && actividad.average_rating > 0 ? (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#D98A5F">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                  </svg>
+                  <span className="text-xs font-bold text-[#1E201D] dark:text-white">
+                    {actividad.average_rating.toFixed(1)}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[11px] font-semibold text-[#3B523E] dark:text-[#A5B29A]">
+                  Verificado
+                </span>
+              )}
             </div>
           </div>
 
@@ -120,15 +133,21 @@ export default function TarjetaActividad({
               <span className="text-xs font-normal text-muted-foreground">MXN</span>
             </span>
           </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onReservar(actividad);
-            }}
-            className="bg-[#728C69] hover:bg-[#5B7153] text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
-          >
-            Reservar
-          </button>
+          {canReserve ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReservar(actividad);
+              }}
+              className="bg-[#728C69] hover:bg-[#5B7153] text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+            >
+              Reservar
+            </button>
+          ) : (
+            <span className="text-xs font-medium text-[#728C69] dark:text-[#A5B29A] px-3 py-1.5 rounded-xl bg-[#F4F1EA] dark:bg-[#18201C]">
+              Ver detalle
+            </span>
+          )}
         </div>
       </div>
     </div>

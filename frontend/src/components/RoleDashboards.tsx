@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   UploadCloud,
   ShieldCheck,
@@ -15,27 +15,31 @@ import {
   Paperclip,
   ExternalLink,
   RefreshCw,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { apiFetch, getUserSession } from "../api/client";
 
-const ALCALDIAS_CDMX = [
-  "Alvaro Obregon",
-  "Azcapotzalco",
-  "Benito Juarez",
-  "Coyoacan",
-  "Cuajimalpa de Morelos",
-  "Cuauhtemoc",
-  "Gustavo A. Madero",
-  "Iztacalco",
-  "Iztapalapa",
-  "La Magdalena Contreras",
-  "Miguel Hidalgo",
-  "Milpa Alta",
-  "Tlahuac",
-  "Tlalpan",
-  "Venustiano Carranza",
-  "Xochimilco",
-];
+const ALCALDIAS_COORDS: Record<string, { lat: number; lng: number }> = {
+  "Alvaro Obregon": { lat: 19.3587, lng: -99.2033 },
+  Azcapotzalco: { lat: 19.4869, lng: -99.1859 },
+  "Benito Juarez": { lat: 19.3719, lng: -99.1578 },
+  Coyoacan: { lat: 19.3467, lng: -99.1617 },
+  "Cuajimalpa de Morelos": { lat: 19.3574, lng: -99.2998 },
+  Cuauhtemoc: { lat: 19.4414, lng: -99.1518 },
+  "Gustavo A. Madero": { lat: 19.4829, lng: -99.1135 },
+  Iztacalco: { lat: 19.3958, lng: -99.0977 },
+  Iztapalapa: { lat: 19.3574, lng: -99.0671 },
+  "La Magdalena Contreras": { lat: 19.3143, lng: -99.2417 },
+  "Miguel Hidalgo": { lat: 19.4079, lng: -99.1917 },
+  "Milpa Alta": { lat: 19.1923, lng: -99.0231 },
+  Tlahuac: { lat: 19.2869, lng: -99.0052 },
+  Tlalpan: { lat: 19.2886, lng: -99.1672 },
+  "Venustiano Carranza": { lat: 19.4194, lng: -99.1138 },
+  Xochimilco: { lat: 19.2647, lng: -99.1036 },
+};
+
+const ALCALDIAS_CDMX = Object.keys(ALCALDIAS_COORDS);
 
 const CATEGORIAS_CATALOGO = [
   { value: "Naturaleza", label: "Naturaleza" },
@@ -49,7 +53,7 @@ const CATEGORIAS_CATALOGO = [
 // ============================================================================
 interface ProviderPortalProps {
   session: { token: string | null; role: string | null; name: string | null };
-  initialTab?: "cuenta" | "resumen" | "evidencias" | "nuevaExp";
+  initialTab?: "cuenta" | "resumen" | "evidencias" | "nuevaExp" | "mensajes";
   onCatalogUpdated: () => void;
   onNavigateReservas: () => void;
 }
@@ -60,15 +64,34 @@ export function ProviderPortal({
   onCatalogUpdated,
   onNavigateReservas,
 }: ProviderPortalProps) {
-  const [activeTab, setActiveTab] = useState<"cuenta" | "solicitudes" | "nuevaExp">(
-    initialTab === "cuenta" ? "cuenta" : initialTab === "resumen" ? "solicitudes" : "nuevaExp"
+  const [activeTab, setActiveTab] = useState<"cuenta" | "solicitudes" | "nuevaExp" | "mensajes">(
+    initialTab === "cuenta"
+      ? "cuenta"
+      : initialTab === "resumen"
+      ? "solicitudes"
+      : initialTab === "mensajes"
+      ? "mensajes"
+      : "nuevaExp"
   );
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(
     null
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingAudits, setLoadingAudits] = useState(false);
+  const [auditsError, setAuditsError] = useState("");
   const [myAudits, setMyAudits] = useState<any[]>([]);
+  const [createdAuditId, setCreatedAuditId] = useState<number | null>(null);
+  const evidenceInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Mensajes de turistas (social-chat)
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [loadingConvs, setLoadingConvs] = useState(false);
+  const [convsError, setConvsError] = useState("");
+  const [selectedConv, setSelectedConv] = useState<{ experienceId: number; otherUserId: number } | null>(null);
+  const [convMessages, setConvMessages] = useState<any[]>([]);
+  const [replyText, setReplyText] = useState("");
+  const [replySending, setReplySending] = useState(false);
+  const [replyError, setReplyError] = useState("");
 
   // Formulario unificado: Datos de Actividad + Evidencias Ambientales
   const [businessName, setBusinessName] = useState(session.name || "Cooperativa Sustentable CDMX");
@@ -88,19 +111,72 @@ export function ProviderPortal({
 
   const loadMyAudits = async () => {
     setLoadingAudits(true);
+    setAuditsError("");
     try {
       const list = await apiFetch<any[]>("/api/catalog/audits/my-audits");
       setMyAudits(Array.isArray(list) ? list : []);
-    } catch {
+    } catch (err: any) {
+      setAuditsError(err.message || "Error al consultar tus solicitudes de auditoría.");
       setMyAudits([]);
     } finally {
       setLoadingAudits(false);
     }
   };
 
+  const loadConversations = async () => {
+    setLoadingConvs(true);
+    setConvsError("");
+    try {
+      const data = await apiFetch<any>("/api/social/chat/conversations");
+      const list = Array.isArray(data) ? data : data?.conversations || [];
+      setConversations(list);
+    } catch (err: any) {
+      setConvsError(err.message || "Error al cargar conversaciones.");
+      setConversations([]);
+    } finally {
+      setLoadingConvs(false);
+    }
+  };
+
+  const loadConversationHistory = async (experienceId: number, otherUserId: number) => {
+    setReplyError("");
+    try {
+      const data = await apiFetch<any>(`/api/social/chat/history/${experienceId}/${otherUserId}`);
+      setConvMessages(Array.isArray(data) ? data : data?.messages || []);
+    } catch (err: any) {
+      setReplyError(err.message || "No se pudo cargar el historial del chat.");
+      setConvMessages([]);
+    }
+  };
+
+  const handleSendReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedConv || !replyText.trim()) return;
+    setReplySending(true);
+    setReplyError("");
+    try {
+      await apiFetch("/api/social/chat/send", {
+        method: "POST",
+        body: JSON.stringify({
+          experienceId: selectedConv.experienceId,
+          recipientId: selectedConv.otherUserId,
+          content: replyText.trim(),
+        }),
+      });
+      setReplyText("");
+      await loadConversationHistory(selectedConv.experienceId, selectedConv.otherUserId);
+      await loadConversations();
+    } catch (err: any) {
+      setReplyError(err.message || "Error al enviar la respuesta.");
+    } finally {
+      setReplySending(false);
+    }
+  };
+
   useEffect(() => {
     if (initialTab === "cuenta") setActiveTab("cuenta");
     else if (initialTab === "resumen") setActiveTab("solicitudes");
+    else if (initialTab === "mensajes") setActiveTab("mensajes");
     else setActiveTab("nuevaExp");
   }, [initialTab]);
 
@@ -112,6 +188,9 @@ export function ProviderPortal({
     if (activeTab === "solicitudes") {
       loadMyAudits();
     }
+    if (activeTab === "mensajes") {
+      loadConversations();
+    }
   }, [activeTab]);
 
   const handleCrearActividadConEvidencia = async (e: React.FormEvent) => {
@@ -120,51 +199,76 @@ export function ProviderPortal({
     setFeedback(null);
 
     try {
-      if (!evidenceFiles || evidenceFiles.length === 0) {
+      const tituloTrim = expTitulo.trim();
+      const descTrim = expDesc.trim();
+      const practicasTrim = expPracticas.trim();
+
+      if (tituloTrim.length < 5) {
+        throw new Error("El título debe tener al menos 5 caracteres válidos (sin solo espacios).");
+      }
+      if (descTrim.length < 20) {
+        throw new Error("La descripción debe tener al menos 20 caracteres válidos.");
+      }
+      if (practicasTrim.length < 10) {
+        throw new Error("Describe tus prácticas sustentables en al menos 10 caracteres.");
+      }
+      if (!createdAuditId && (!evidenceFiles || evidenceFiles.length === 0)) {
         throw new Error("Debes adjuntar al menos un archivo de evidencia ecológica (PDF o imagen).");
       }
 
-      // 1. Subir evidencias y generar solicitud de auditoría PENDING
-      const fd = new FormData();
-      fd.append("business_name", `${businessName.trim()} — ${expTitulo.trim()}`);
-      fd.append("category", expCategoria);
-      fd.append(
-        "description",
-        `${expDesc.trim()} | Prácticas sustentables: ${expPracticas.trim()} (${expAlcaldia}, CDMX)`
-      );
-      Array.from(evidenceFiles).forEach((f) => fd.append("files", f));
+      // 1. Subir evidencias y generar solicitud de auditoría PENDING (si no se creó ya en un intento previo)
+      let auditId = createdAuditId;
+      if (!auditId) {
+        const fd = new FormData();
+        fd.append("business_name", `${businessName.trim()} — ${tituloTrim}`);
+        fd.append("category", expCategoria);
+        fd.append(
+          "description",
+          `${descTrim} | Prácticas sustentables: ${practicasTrim} (${expAlcaldia}, CDMX)`
+        );
+        Array.from(evidenceFiles!).forEach((f) => fd.append("files", f));
 
-      const auditRes = await apiFetch<any>("/api/catalog/audits/submit", {
-        method: "POST",
-        body: fd,
-      });
+        const auditRes = await apiFetch<any>("/api/catalog/audits/submit", {
+          method: "POST",
+          body: fd,
+        });
+        auditId = auditRes.audit_id;
+        setCreatedAuditId(auditId);
+      }
+
+      const coords = ALCALDIAS_COORDS[expAlcaldia] || { lat: 19.4326, lng: -99.1332 };
 
       // 2. Registrar la actividad en PostGIS como INACTIVA (is_active=False) hasta aprobación del Admin
       await apiFetch<any>("/api/catalog/experiences/", {
         method: "POST",
         body: JSON.stringify({
-          title: expTitulo.trim(),
-          description: expDesc.trim(),
+          title: tituloTrim,
+          description: descTrim,
           category: expCategoria,
           borough_cdmx: expAlcaldia,
-          latitude: 19.2647,
-          longitude: -99.1036,
+          latitude: coords.lat,
+          longitude: coords.lng,
           price: Number(expPrecio),
           duration_minutes: Number(expDuracion),
           max_capacity: Math.min(50, Math.max(1, Number(expCapacidad))),
           pet_friendly: petFriendly,
           accessible,
-          sustainable_practices: expPracticas.trim(),
+          sustainable_practices: practicasTrim,
         }),
       });
 
+      const filesCount = evidenceFiles?.length || 1;
       setFeedback({
         type: "success",
-        text: `¡Actividad "${expTitulo.trim()}" y ${evidenceFiles.length} evidencia(s) enviadas! Quedó registrada en Auditoría #${auditRes.audit_id} y aparecerá en el catálogo público en cuanto un Administrador la apruebe.`,
+        text: `¡Actividad "${tituloTrim}" y ${filesCount} evidencia(s) enviadas! Quedó registrada en Auditoría #${auditId} y aparecerá en el catálogo público en cuanto un Administrador la apruebe.`,
       });
+      setCreatedAuditId(null);
       setExpTitulo("");
       setExpDesc("");
       setEvidenceFiles(null);
+      if (evidenceInputRef.current) {
+        evidenceInputRef.current.value = "";
+      }
       await loadMyAudits();
       setActiveTab("solicitudes");
       onCatalogUpdated();
@@ -178,11 +282,12 @@ export function ProviderPortal({
   return (
     <main className="flex-1 w-full bg-[#F4F1EA] dark:bg-[#18201C] transition-colors duration-300 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
-        <div className="flex flex-wrap bg-[#E3E5D8] dark:bg-[#2A312C] p-1 rounded-xl mb-8 max-w-lg">
+        <div className="flex flex-wrap bg-[#E3E5D8] dark:bg-[#2A312C] p-1 rounded-xl mb-8 max-w-2xl">
           {[
             { id: "cuenta", label: "Mi Cuenta" },
             { id: "nuevaExp", label: "+ Nueva Actividad y Evidencias" },
             { id: "solicitudes", label: `Mis Solicitudes (${myAudits.length})` },
+            { id: "mensajes", label: "Mensajes" },
           ].map((t) => (
             <button
               key={t.id}
@@ -255,6 +360,14 @@ export function ProviderPortal({
                 className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
               >
                 <span className="text-base font-medium">Estado de mis Auditorías</span>
+                <ArrowRight className="w-4 h-4 text-[#8C9287]" />
+              </button>
+
+              <button
+                onClick={() => setActiveTab("mensajes")}
+                className="w-full bg-white dark:bg-[#2A312C] rounded-2xl p-4 flex items-center justify-between shadow-sm hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F] transition-colors"
+              >
+                <span className="text-base font-medium">Mensajes de Turistas</span>
                 <ArrowRight className="w-4 h-4 text-[#8C9287]" />
               </button>
 
@@ -438,13 +551,19 @@ export function ProviderPortal({
                   Adjunta permisos ambientales, certificaciones o fotografías reales de tus instalaciones y manejo de residuos.
                 </p>
                 <input
-                  required
+                  ref={evidenceInputRef}
+                  required={!createdAuditId}
                   type="file"
                   accept=".pdf,image/*"
                   multiple
                   onChange={(e) => setEvidenceFiles(e.target.files)}
                   className="w-full text-xs p-2 rounded-xl bg-white dark:bg-[#2A312C]"
                 />
+                {createdAuditId && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                    Las evidencias ya fueron cargadas en Auditoría #{createdAuditId}. Al reenviar se registrará solo la experiencia sin duplicar auditorías.
+                  </p>
+                )}
               </div>
 
               <button
@@ -483,6 +602,12 @@ export function ProviderPortal({
                 Actualizar
               </button>
             </div>
+
+            {auditsError && (
+              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 text-xs text-red-700 dark:text-red-300">
+                {auditsError}
+              </div>
+            )}
 
             {loadingAudits ? (
               <p className="text-sm text-muted-foreground">Consultando estado de auditorías...</p>
@@ -556,6 +681,130 @@ export function ProviderPortal({
             )}
           </div>
         )}
+
+        {/* SUBVISTA D: MENSAJES DE TURISTAS */}
+        {activeTab === "mensajes" && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-serif text-xl font-bold flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-[#728C69]" />
+                  Conversaciones
+                </h2>
+                <button
+                  type="button"
+                  onClick={loadConversations}
+                  disabled={loadingConvs}
+                  className="text-xs text-[#728C69] hover:underline flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingConvs ? "animate-spin" : ""}`} />
+                  Actualizar
+                </button>
+              </div>
+
+              {convsError && (
+                <p className="text-xs text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-xl">
+                  {convsError}
+                </p>
+              )}
+
+              {loadingConvs ? (
+                <p className="text-xs text-muted-foreground">Cargando conversaciones...</p>
+              ) : conversations.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Aún no has recibido mensajes de turistas.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {conversations.map((c: any, idx: number) => {
+                    const expId = Number(c.experienceId ?? c.experience_id ?? 0);
+                    const otherId = Number(c.otherUserId ?? c.other_user_id ?? c.touristId ?? 0);
+                    const preview = c.lastMessage ?? c.last_message ?? c.content ?? "";
+                    const isSelected =
+                      selectedConv?.experienceId === expId && selectedConv?.otherUserId === otherId;
+                    return (
+                      <button
+                        key={`${expId}-${otherId}-${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedConv({ experienceId: expId, otherUserId: otherId });
+                          loadConversationHistory(expId, otherId);
+                        }}
+                        className={`w-full text-left p-3 rounded-2xl text-xs transition-colors ${
+                          isSelected
+                            ? "bg-[#728C69] text-white"
+                            : "bg-[#F4F1EA] dark:bg-[#18201C] hover:bg-[#E3E5D8] dark:hover:bg-[#3D453F]"
+                        }`}
+                      >
+                        <div className="font-bold">
+                          Turista #{otherId} · Exp #{expId}
+                        </div>
+                        {preview && (
+                          <p className="truncate opacity-80 mt-0.5">{preview}</p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="md:col-span-2 bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm flex flex-col justify-between min-h-[340px]">
+              {!selectedConv ? (
+                <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground text-center">
+                  Selecciona una conversación para leer el historial y responder al turista.
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <h3 className="font-serif text-lg font-bold mb-3">
+                      Chat con Turista #{selectedConv.otherUserId} · Experiencia #{selectedConv.experienceId}
+                    </h3>
+                    <div className="bg-[#F4F1EA] dark:bg-[#18201C] rounded-2xl p-4 max-h-64 overflow-y-auto space-y-2 mb-4">
+                      {convMessages.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Sin mensajes en esta conversación.</p>
+                      ) : (
+                        convMessages.map((m: any, idx: number) => (
+                          <div
+                            key={m._id || idx}
+                            className="bg-white dark:bg-[#2A312C] rounded-xl p-2.5 text-xs"
+                          >
+                            <span className="font-bold text-[#728C69] block mb-0.5">
+                              {m.senderRole === "PROVIDER" ? "Tú (Cooperativa)" : `Turista #${m.senderId}`}
+                            </span>
+                            <span>{m.content}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {replyError && (
+                    <p className="text-xs text-red-600 mb-2">{replyError}</p>
+                  )}
+
+                  <form onSubmit={handleSendReply} className="flex gap-2">
+                    <input
+                      required
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      placeholder="Escribe tu respuesta para el turista..."
+                      className="flex-1 bg-[#F4F1EA] dark:bg-[#18201C] rounded-xl px-3 h-10 text-xs"
+                    />
+                    <button
+                      disabled={replySending}
+                      type="submit"
+                      className="bg-[#C81D77] hover:bg-[#A91864] text-white px-4 rounded-xl text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      {replySending ? "Enviando..." : "Responder"}
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
@@ -571,6 +820,7 @@ interface AdminAuditsPortalProps {
 export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) {
   const [audits, setAudits] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
   const [retroalimentacion, setRetroalimentacion] = useState("");
@@ -580,10 +830,12 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
 
   const fetchAuditorias = async () => {
     setIsLoading(true);
+    setLoadError("");
     try {
       const data = await apiFetch<any[]>("/api/catalog/audits/pending");
       setAudits(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (err: any) {
+      setLoadError(err.message || "No se pudieron cargar las auditorías pendientes.");
       setAudits([]);
     } finally {
       setIsLoading(false);
@@ -607,6 +859,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       window.open(blobUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (err: any) {
       setStatusMessage({ type: "error", text: err.message });
     } finally {
@@ -615,7 +868,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
   };
 
   const handleDictamen = async (decision: "APPROVED" | "REJECTED") => {
-    if (!selectedAudit) return;
+    if (!selectedAudit || isSubmitting) return;
     setIsSubmitting(true);
     setStatusMessage(null);
 
@@ -642,15 +895,16 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
 
       if (onCatalogUpdated) onCatalogUpdated();
 
+      const resolvedId = selectedAudit.id;
       setTimeout(() => {
-        setAudits((prev) => prev.filter((a) => a.id !== selectedAudit.id));
+        setAudits((prev) => prev.filter((a) => a.id !== resolvedId));
         setSelectedAudit(null);
         setRetroalimentacion("");
         setStatusMessage(null);
+        setIsSubmitting(false);
       }, 900);
     } catch (err: any) {
       setStatusMessage({ type: "error", text: err.message });
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -875,6 +1129,12 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
             </button>
           ))}
         </div>
+
+        {loadError && (
+          <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-950/30 border border-red-200 text-xs text-red-700 dark:text-red-300 mb-6">
+            {loadError}
+          </div>
+        )}
 
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Cargando auditorías pendientes...</p>

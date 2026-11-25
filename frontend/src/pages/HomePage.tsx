@@ -229,7 +229,7 @@ export default function HomePage({ session, onNavigate }: HomePageProps) {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => onNavigate("negocio-dashboard")}
+                  onClick={() => onNavigate("negocio-nueva")}
                   className="px-4 py-2 rounded-full bg-[#728C69] hover:bg-[#5b7353] text-white text-xs font-medium transition-all shadow-sm"
                 >
                   Publicar Experiencia
@@ -267,7 +267,7 @@ export default function HomePage({ session, onNavigate }: HomePageProps) {
             </button>
 
             <button
-              onClick={() => onNavigate("negocio-dashboard")}
+              onClick={() => onNavigate("negocio-nueva")}
               className="text-left group bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm hover:border-[#728C69]/30 border border-transparent transition-all flex flex-col justify-between"
             >
               <div>

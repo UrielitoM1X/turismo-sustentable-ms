@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ShieldCheck,
   Sparkles,
@@ -24,6 +24,7 @@ import { ProviderPortal, AdminAuditsPortal } from "./components/RoleDashboards";
 import PerfilPortal from "./components/PerfilPortal";
 import {
   apiFetch,
+  decodeJwtPayload,
   getUserSession,
   clearUserSession,
 } from "./api/client";
@@ -33,13 +34,18 @@ export interface ActividadConProveedor extends ActividadItem {
 }
 
 function getUserIdFromToken(token: string | null): number | null {
-  if (!token) return null;
-  try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload?.sub ? Number(payload.sub) : null;
-  } catch {
-    return null;
-  }
+  const payload = decodeJwtPayload(token);
+  const sub = payload?.sub !== undefined && payload?.sub !== null ? Number(payload.sub) : null;
+  return sub !== null && Number.isFinite(sub) ? sub : null;
+}
+
+function getLocalDateString(offsetDays = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function App() {
@@ -55,8 +61,12 @@ export default function App() {
   const [onlyPetFriendly, setOnlyPetFriendly] = useState(false);
   const [onlyAccessible, setOnlyAccessible] = useState(false);
 
-  // Favoritos persistentes por usuario
-  const favKey = `ts_favs_${session.name || "guest"}`;
+  const isTourist = session.role?.toUpperCase() === "TOURIST";
+  const currentUserId = session.userId ?? getUserIdFromToken(session.token);
+  const canReserve = !session.token || isTourist;
+
+  // Favoritos persistentes por usuario (sincronizados con booking-payment para TOURIST)
+  const favKey = `ts_favs_${currentUserId ?? session.name ?? "guest"}`;
   const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
     try {
       return JSON.parse(localStorage.getItem(favKey) || "[]");
@@ -66,19 +76,51 @@ export default function App() {
   });
 
   useEffect(() => {
-    try {
-      setFavoriteIds(JSON.parse(localStorage.getItem(favKey) || "[]"));
-    } catch {
-      setFavoriteIds([]);
+    if (session.token && isTourist) {
+      apiFetch<{ favorite_experience_ids?: number[] }>("/api/bookings/planning/favorites")
+        .then((res) => {
+          const ids = Array.isArray(res?.favorite_experience_ids)
+            ? res.favorite_experience_ids.map(Number)
+            : [];
+          setFavoriteIds(ids);
+          localStorage.setItem(favKey, JSON.stringify(ids));
+        })
+        .catch(() => {
+          try {
+            setFavoriteIds(JSON.parse(localStorage.getItem(favKey) || "[]"));
+          } catch {
+            setFavoriteIds([]);
+          }
+        });
+    } else {
+      try {
+        setFavoriteIds(JSON.parse(localStorage.getItem(favKey) || "[]"));
+      } catch {
+        setFavoriteIds([]);
+      }
     }
-  }, [favKey]);
+  }, [favKey, session.token, isTourist]);
 
-  const toggleFavorite = (id: number) => {
+  const toggleFavorite = async (id: number) => {
     setFavoriteIds((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
       localStorage.setItem(favKey, JSON.stringify(next));
       return next;
     });
+    if (session.token && isTourist) {
+      try {
+        const res = await apiFetch<any>(`/api/bookings/planning/favorites/${id}`, {
+          method: "POST",
+        });
+        if (Array.isArray(res?.favorite_experience_ids)) {
+          const ids = res.favorite_experience_ids.map(Number);
+          setFavoriteIds(ids);
+          localStorage.setItem(favKey, JSON.stringify(ids));
+        }
+      } catch {
+        // Fallback local ya aplicado
+      }
+    }
   };
 
   // Detalle, Reseñas y Chat Directo (social-service)
@@ -93,6 +135,7 @@ export default function App() {
   const [reviewComment, setReviewComment] = useState("");
   const [reviewEcoVerified, setReviewEcoVerified] = useState(true);
   const [reviewPhotos, setReviewPhotos] = useState<FileList | null>(null);
+  const reviewPhotosInputRef = useRef<HTMLInputElement | null>(null);
   const [reviewMsg, setReviewMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
@@ -104,16 +147,14 @@ export default function App() {
 
   // Checkout
   const [checkoutExp, setCheckoutExp] = useState<ActividadConProveedor | null>(null);
-  const [bookingDate, setBookingDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split("T")[0];
-  });
+  const [bookingDate, setBookingDate] = useState(() => getLocalDateString(1));
   const [guests, setGuests] = useState(2);
   const [accessNotes, setAccessNotes] = useState("");
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingReceipt, setBookingReceipt] = useState<any>(null);
   const [bookingError, setBookingError] = useState("");
+  const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const [pendingImpact, setPendingImpact] = useState<number | null>(null);
 
   // Mis Reservas (también se usa para validar elegibilidad de reseña)
   const [myBookings, setMyBookings] = useState<any[]>([]);
@@ -123,6 +164,7 @@ export default function App() {
     "Busco algo de naturaleza y accesible para ir con mi perro"
   );
   const [aiReply, setAiReply] = useState("");
+  const [aiSuggestions, setAiSuggestions] = useState<ActividadConProveedor[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
 
   // Panel BI (Admin)
@@ -196,16 +238,23 @@ export default function App() {
   }, [session.token]);
 
   useEffect(() => {
+    setChatHistory([]);
+    setReviewsData({ average_rating: 0, total_reviews: 0, reviews: [] });
     if (detailExp) {
       setDetailTab("reviews");
       setReviewMsg(null);
       setReviewComment("");
       setReviewPhotos(null);
+      if (reviewPhotosInputRef.current) {
+        reviewPhotosInputRef.current.value = "";
+      }
       setChatError("");
       loadReviews(detailExp.id);
       if (session.token) {
         loadMyBookings();
-        loadChat(detailExp);
+        if (isTourist) {
+          loadChat(detailExp);
+        }
       }
     }
   }, [detailExp]);
@@ -246,6 +295,9 @@ export default function App() {
       setReviewMsg({ type: "ok", text: "¡Reseña verificada publicada con éxito!" });
       setReviewComment("");
       setReviewPhotos(null);
+      if (reviewPhotosInputRef.current) {
+        reviewPhotosInputRef.current.value = "";
+      }
       await loadReviews(detailExp.id);
     } catch (err: any) {
       setReviewMsg({ type: "err", text: err.message });
@@ -284,9 +336,35 @@ export default function App() {
       setView("auth");
       return;
     }
+    if (!isTourist) {
+      return;
+    }
     setBookingReceipt(null);
     setBookingError("");
+    setPendingBookingId(null);
+    setPendingImpact(null);
+    setAccessNotes("");
+    setBookingDate(getLocalDateString(1));
+    setGuests(Math.min(2, Math.max(1, actividad.max_capacity || 1)));
     setCheckoutExp(actividad);
+  };
+
+  const handleCancelCheckoutModal = async () => {
+    if (bookingLoading) return;
+    if (pendingBookingId) {
+      try {
+        await apiFetch(`/api/bookings/reservations/${pendingBookingId}/cancel`, {
+          method: "POST",
+        });
+        await loadMyBookings();
+      } catch {
+        // Si ya expiró o falló la cancelación, cerramos el modal igualmente
+      }
+    }
+    setPendingBookingId(null);
+    setPendingImpact(null);
+    setBookingError("");
+    setCheckoutExp(null);
   };
 
   const handlePayBooking = async () => {
@@ -294,33 +372,56 @@ export default function App() {
     setBookingLoading(true);
     setBookingError("");
     try {
-      const pre = await apiFetch<any>("/api/bookings/reservations/reserve", {
-        method: "POST",
-        body: JSON.stringify({
-          experience_id: checkoutExp.id,
-          activity_date: bookingDate,
-          guests_count: guests,
-          accessibility_notes: accessNotes || undefined,
-          unit_price: checkoutExp.price,
-          max_ecological_capacity: checkoutExp.max_capacity,
-        }),
-      });
+      let bookingIdToPay = pendingBookingId;
+      let impactContribution = pendingImpact;
+      let preTotalAmount: number | null = null;
+
+      if (!bookingIdToPay) {
+        const pre = await apiFetch<any>("/api/bookings/reservations/reserve", {
+          method: "POST",
+          body: JSON.stringify({
+            experience_id: checkoutExp.id,
+            activity_date: bookingDate,
+            guests_count: guests,
+            accessibility_notes: accessNotes || undefined,
+            unit_price: checkoutExp.price,
+            max_ecological_capacity: checkoutExp.max_capacity,
+          }),
+        });
+        bookingIdToPay = pre.booking_id;
+        impactContribution =
+          typeof pre.impact_contribution === "number" ? pre.impact_contribution : null;
+        preTotalAmount = typeof pre.total_amount === "number" ? pre.total_amount : null;
+        setPendingBookingId(bookingIdToPay);
+        setPendingImpact(impactContribution);
+      }
 
       const paid = await apiFetch<any>("/api/bookings/reservations/pay", {
         method: "POST",
         body: JSON.stringify({
-          booking_id: pre.booking_id,
+          booking_id: bookingIdToPay,
           payment_method: "CARD",
           simulate_failure: false,
         }),
       });
 
+      const baseAmount = Number((checkoutExp.price * guests).toFixed(2));
+      const fallbackImpact = Number((baseAmount * 0.05).toFixed(2));
+      const finalImpact = impactContribution ?? fallbackImpact;
+      const finalTotal =
+        typeof paid.total_paid === "number"
+          ? paid.total_paid
+          : preTotalAmount ?? Number((baseAmount + finalImpact).toFixed(2));
+
+      setPendingBookingId(null);
+      setPendingImpact(null);
       setBookingReceipt({
         ...paid,
         title: checkoutExp.title,
         date: bookingDate,
         guests,
-        total: checkoutExp.price * guests + 50,
+        impact_contribution: finalImpact,
+        total: finalTotal,
       });
       await loadMyBookings();
     } catch (err: any) {
@@ -332,15 +433,25 @@ export default function App() {
 
   const handleAskAi = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmed = aiMessage.trim();
+    if (trimmed.length < 2) {
+      setAiReply("Por favor escribe al menos 2 caracteres para buscar recomendaciones.");
+      setAiSuggestions([]);
+      return;
+    }
     setAiLoading(true);
     try {
       const res = await apiFetch<any>("/api/ai/assistant/chat", {
         method: "POST",
-        body: JSON.stringify({ message: aiMessage }),
+        body: JSON.stringify({ message: trimmed }),
       });
       setAiReply(res.assistant_reply || JSON.stringify(res));
+      setAiSuggestions(
+        Array.isArray(res.suggested_experiences) ? res.suggested_experiences : []
+      );
     } catch (err: any) {
       setAiReply(`Error: ${err.message}`);
+      setAiSuggestions([]);
     } finally {
       setAiLoading(false);
     }
@@ -349,6 +460,19 @@ export default function App() {
   const handleLogout = () => {
     clearUserSession();
     setSession(getUserSession());
+    setBiData(null);
+    setBiError("");
+    setChatHistory([]);
+    setReviewsData({ average_rating: 0, total_reviews: 0, reviews: [] });
+    setDetailExp(null);
+    setCheckoutExp(null);
+    setBookingReceipt(null);
+    setPendingBookingId(null);
+    setPendingImpact(null);
+    setAccessNotes("");
+    setAiReply("");
+    setAiSuggestions([]);
+    setMyBookings([]);
     setView("home");
   };
 
@@ -364,9 +488,6 @@ export default function App() {
     const matchesAccess = !onlyAccessible || Boolean(e.accessible);
     return matchesSearch && matchesCategory && matchesPet && matchesAccess;
   });
-
-  const isTourist = session.role?.toUpperCase() === "TOURIST";
-  const currentUserId = getUserIdFromToken(session.token);
 
   // Reglas de elegibilidad para reseñar la experiencia abierta en detalle
   const hasVisitedExperience = detailExp
@@ -481,6 +602,7 @@ export default function App() {
                   key={exp.id}
                   actividad={exp}
                   isFavorite={favoriteIds.includes(exp.id)}
+                  canReserve={canReserve}
                   onToggleFavorite={toggleFavorite}
                   onReservar={handleOpenCheckout}
                   onVerDetalle={setDetailExp}
@@ -553,6 +675,13 @@ export default function App() {
             <div className="space-y-4">
               {myBookings.map((b) => {
                 const expInfo = experiences.find((e) => Number(e.id) === Number(b.experience_id));
+                const st = String(b.status || "").toUpperCase();
+                const statusBadgeClass =
+                  st === "CONFIRMED" || st === "PAID" || st === "COMPLETED"
+                    ? "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300"
+                    : st === "PENDING_PAYMENT"
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                    : "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300";
                 return (
                   <div
                     key={b.id}
@@ -566,10 +695,12 @@ export default function App() {
                         {expInfo ? expInfo.title : `Experiencia #${b.experience_id}`} · {b.activity_date}
                       </h3>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {b.guests_count} visitantes · Total pagado: ${b.total_amount} MXN
+                        {b.guests_count} visitantes · Total: ${b.total_amount} MXN
                       </p>
                     </div>
-                    <span className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 self-start sm:self-center">
+                    <span
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-semibold self-start sm:self-center ${statusBadgeClass}`}
+                    >
                       {b.status}
                     </span>
                   </div>
@@ -610,8 +741,39 @@ export default function App() {
             </form>
 
             {aiReply && (
-              <div className="bg-[#F2EFE9] dark:bg-[#18201C] p-6 rounded-2xl text-sm leading-relaxed">
-                {aiReply}
+              <div className="bg-[#F2EFE9] dark:bg-[#18201C] p-6 rounded-2xl text-sm leading-relaxed space-y-4">
+                <p>{aiReply}</p>
+                {aiSuggestions.length > 0 && (
+                  <div className="pt-3 border-t border-border">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#728C69] mb-3">
+                      Experiencias Sugeridas ({aiSuggestions.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {aiSuggestions.map((sug: any) => {
+                        const fullExp =
+                          experiences.find((e) => Number(e.id) === Number(sug.id)) || sug;
+                        return (
+                          <button
+                            key={sug.id}
+                            type="button"
+                            onClick={() => setDetailExp(fullExp)}
+                            className="text-left bg-white dark:bg-[#2A312C] rounded-2xl p-4 shadow-sm hover:border-[#728C69] border border-transparent transition-all"
+                          >
+                            <span className="text-[10px] font-bold uppercase text-[#728C69]">
+                              {fullExp.category} · {fullExp.borough_cdmx}
+                            </span>
+                            <h4 className="font-serif text-base font-bold mt-1 line-clamp-1">
+                              {fullExp.title}
+                            </h4>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              ${fullExp.price} MXN · Ver detalle →
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -665,32 +827,67 @@ export default function App() {
                 <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm">
                   <div className="flex items-center gap-2 mb-4">
                     <BarChart3 className="w-5 h-5 text-[#728C69]" />
-                    <h2 className="font-serif text-xl">Oferta Verificada por Categoría</h2>
+                    <h2 className="font-serif text-xl">Desempeño por Categoría (BI)</h2>
                   </div>
                   <div className="space-y-4">
-                    {Object.entries(categoryBreakdown).map(([cat, count]) => {
-                      const pct = Math.min(100, Math.round((count / Math.max(1, experiences.length)) * 100));
-                      return (
-                        <div key={cat} className="space-y-1.5">
-                          <div className="flex justify-between text-xs font-medium">
-                            <span>{cat}</span>
-                            <span>
-                              {count} experiencia{count === 1 ? "" : "s"} ({pct}%)
-                            </span>
+                    {Array.isArray(biData.by_category) && biData.by_category.length > 0 ? (
+                      (() => {
+                        const maxBookings = Math.max(
+                          1,
+                          ...biData.by_category.map((c: any) => Number(c.bookings || c.count || 0))
+                        );
+                        return biData.by_category.map((item: any, idx: number) => {
+                          const cat = item.category || "Ecoturismo";
+                          const count = Number(item.bookings ?? item.count ?? 0);
+                          const revenue = item.revenue !== undefined ? Number(item.revenue) : null;
+                          const pct = Math.min(100, Math.round((count / maxBookings) * 100));
+                          return (
+                            <div key={`${cat}-${idx}`} className="space-y-1.5">
+                              <div className="flex justify-between text-xs font-medium">
+                                <span>{cat}</span>
+                                <span>
+                                  {count} reserva{count === 1 ? "" : "s"}
+                                  {revenue !== null ? ` · $${revenue.toFixed(2)} MXN` : ""}
+                                </span>
+                              </div>
+                              <div className="w-full h-2.5 bg-[#F2EFE9] dark:bg-[#18201C] rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-[#728C69] rounded-full transition-all duration-500"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()
+                    ) : (
+                      Object.entries(categoryBreakdown).map(([cat, count]) => {
+                        const pct = Math.min(
+                          100,
+                          Math.round((count / Math.max(1, experiences.length)) * 100)
+                        );
+                        return (
+                          <div key={cat} className="space-y-1.5">
+                            <div className="flex justify-between text-xs font-medium">
+                              <span>{cat}</span>
+                              <span>
+                                {count} experiencia{count === 1 ? "" : "s"} ({pct}%)
+                              </span>
+                            </div>
+                            <div className="w-full h-2.5 bg-[#F2EFE9] dark:bg-[#18201C] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#728C69] rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="w-full h-2.5 bg-[#F2EFE9] dark:bg-[#18201C] rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-[#728C69] rounded-full transition-all duration-500"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col justify-between">
+                <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col justify-between space-y-6">
                   <div>
                     <span className="text-xs font-bold uppercase text-[#C81D77]">
                       Impacto Regenerativo CDMX
@@ -699,10 +896,35 @@ export default function App() {
                       Distribución del Fondo de Conservación
                     </h2>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      Cada reservación aporta $50 MXN directos a proyectos de conservación de suelo de conservación, reforestación y saneamiento de canales en la Ciudad de México.
+                      Cada reservación aporta un 5% directo a proyectos de conservación de suelo de conservación, reforestación y saneamiento de canales en la Ciudad de México.
                     </p>
                   </div>
-                  <div className="mt-6 p-4 rounded-2xl bg-[#F2EFE9] dark:bg-[#18201C] flex items-center justify-between">
+
+                  {Array.isArray(biData.top_providers) && biData.top_providers.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-[#728C69] mb-2">
+                        Top Proveedores Sustentables
+                      </h3>
+                      <div className="space-y-2">
+                        {biData.top_providers.map((prov: any, idx: number) => (
+                          <div
+                            key={prov.provider_id ?? idx}
+                            className="flex items-center justify-between text-xs bg-[#F2EFE9] dark:bg-[#18201C] px-3 py-2 rounded-xl"
+                          >
+                            <span className="font-semibold">
+                              {prov.provider_name || `Proveedor #${prov.provider_id}`}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {prov.bookings ?? prov.total_bookings ?? 0} reservas · $
+                              {Number(prov.revenue ?? prov.total_revenue ?? 0).toFixed(2)} MXN
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-4 rounded-2xl bg-[#F2EFE9] dark:bg-[#18201C] flex items-center justify-between">
                     <div>
                       <span className="text-xs text-muted-foreground block">
                         Promedio de aporte por turista
@@ -730,10 +952,18 @@ export default function App() {
       )}
 
       {/* VISTA 9: PROVEEDOR - PORTAL COMPLETO */}
-      {(view === "negocio-documentos" || view === "negocio-dashboard") && (
+      {(view === "negocio-documentos" ||
+        view === "negocio-dashboard" ||
+        view === "negocio-nueva") && (
         <ProviderPortal
           session={session}
-          initialTab={view === "negocio-documentos" ? "evidencias" : "cuenta"}
+          initialTab={
+            view === "negocio-documentos"
+              ? "evidencias"
+              : view === "negocio-nueva"
+              ? "nuevaExp"
+              : "cuenta"
+          }
           onCatalogUpdated={loadCatalog}
           onNavigateReservas={() => setView("reservas")}
         />
@@ -801,16 +1031,22 @@ export default function App() {
                 <span className="text-xs text-muted-foreground block">Tarifa por persona</span>
                 <span className="text-xl font-bold">${detailExp.price} MXN</span>
               </div>
-              <button
-                onClick={() => {
-                  const chosen = detailExp;
-                  setDetailExp(null);
-                  handleOpenCheckout(chosen);
-                }}
-                className="bg-[#C81D77] hover:bg-[#A91864] text-white text-sm font-medium px-6 py-3 rounded-full"
-              >
-                Reservar ahora
-              </button>
+              {canReserve ? (
+                <button
+                  onClick={() => {
+                    const chosen = detailExp;
+                    setDetailExp(null);
+                    handleOpenCheckout(chosen);
+                  }}
+                  className="bg-[#C81D77] hover:bg-[#A91864] text-white text-sm font-medium px-6 py-3 rounded-full"
+                >
+                  Reservar ahora
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground bg-[#F2EFE9] dark:bg-[#18201C] px-4 py-2 rounded-full">
+                  Solo cuentas Turista pueden reservar
+                </span>
+              )}
             </div>
 
             {/* PESTAÑAS SOCIALES */}
@@ -825,17 +1061,19 @@ export default function App() {
               >
                 Reseñas Verificadas ({reviewsData.total_reviews})
               </button>
-              <button
-                onClick={() => setDetailTab("chat")}
-                className={`px-4 py-2 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${
-                  detailTab === "chat"
-                    ? "bg-[#728C69] text-white"
-                    : "bg-[#F2EFE9] dark:bg-[#18201C]"
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                Contactar Cooperativa
-              </button>
+              {isTourist && (
+                <button
+                  onClick={() => setDetailTab("chat")}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${
+                    detailTab === "chat"
+                      ? "bg-[#728C69] text-white"
+                      : "bg-[#F2EFE9] dark:bg-[#18201C]"
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Contactar Cooperativa
+                </button>
+              )}
             </div>
 
             {detailTab === "reviews" ? (
@@ -923,6 +1161,7 @@ export default function App() {
                                 : "Adjuntar fotos"}
                             </span>
                             <input
+                              ref={reviewPhotosInputRef}
                               type="file"
                               accept="image/*"
                               multiple
@@ -978,9 +1217,32 @@ export default function App() {
                         </div>
                         <p className="text-xs text-foreground">{rev.comment}</p>
                         {Array.isArray(rev.photoKeys) && rev.photoKeys.length > 0 && (
-                          <p className="text-[10px] text-[#728C69] font-medium">
-                            {rev.photoKeys.length} fotografía(s) probatoria(s) en RustFS/S3
-                          </p>
+                          <div className="pt-1.5">
+                            <p className="text-[10px] text-[#728C69] font-medium mb-1.5">
+                              {rev.photoKeys.length} fotografía(s) probatoria(s) en RustFS/S3
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {rev.photoKeys.map((_: any, photoIdx: number) => {
+                                const photoUrl = `/api/social/reviews/${rev._id}/photos/${photoIdx}`;
+                                return (
+                                  <a
+                                    key={photoIdx}
+                                    href={photoUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block w-16 h-16 rounded-xl overflow-hidden border border-border bg-white dark:bg-[#2A312C]"
+                                  >
+                                    <img
+                                      src={photoUrl}
+                                      alt={`Evidencia ${photoIdx + 1}`}
+                                      loading="lazy"
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -1043,7 +1305,13 @@ export default function App() {
       )}
 
       {/* MODAL CHECKOUT & PASE ECOLÓGICO */}
-      {checkoutExp && (
+      {checkoutExp && (() => {
+        const todayLocal = getLocalDateString(0);
+        const maxCap = Math.max(1, checkoutExp.max_capacity || 1);
+        const baseAmount = Number((checkoutExp.price * guests).toFixed(2));
+        const impactAmount = Number((baseAmount * 0.05).toFixed(2));
+        const totalAmount = Number((baseAmount + impactAmount).toFixed(2));
+        return (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-md w-full p-6 sm:p-8 shadow-xl">
             {bookingReceipt ? (
@@ -1061,8 +1329,13 @@ export default function App() {
                     {bookingReceipt.access_code}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Fecha: {bookingReceipt.date} · {bookingReceipt.guests} visitantes · Total: $
-                    {bookingReceipt.total} MXN
+                    Fecha: {bookingReceipt.date} · {bookingReceipt.guests} visitantes
+                  </p>
+                  <p className="text-xs text-[#728C69] font-medium">
+                    Fondo ambiental (5%): ${Number(bookingReceipt.impact_contribution ?? 0).toFixed(2)} MXN
+                  </p>
+                  <p className="text-xs font-bold">
+                    Total pagado: ${Number(bookingReceipt.total ?? 0).toFixed(2)} MXN
                   </p>
                 </div>
                 <button
@@ -1082,7 +1355,7 @@ export default function App() {
                 </div>
                 <h2 className="font-serif text-2xl mb-1">{checkoutExp.title}</h2>
                 <p className="text-xs text-muted-foreground mb-5">
-                  {checkoutExp.borough_cdmx}, CDMX · Cupo ecológico máx: {checkoutExp.max_capacity}
+                  {checkoutExp.borough_cdmx}, CDMX · Cupo ecológico máx: {maxCap}
                 </p>
 
                 {bookingError && (
@@ -1092,26 +1365,38 @@ export default function App() {
                   </div>
                 )}
 
+                {pendingBookingId && (
+                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-xs mb-4">
+                    Tu cupo sigue apartado (Reserva #{pendingBookingId}). Puedes reintentar el pago sin crear duplicados o cancelar para liberar el cupo.
+                  </div>
+                )}
+
                 <div className="space-y-4 mb-6 text-sm">
                   <div>
                     <label className="block text-xs font-medium mb-1">Fecha de visita</label>
                     <input
                       type="date"
+                      disabled={bookingLoading || Boolean(pendingBookingId)}
                       value={bookingDate}
-                      min={new Date().toISOString().split("T")[0]}
+                      min={todayLocal}
                       onChange={(e) => setBookingDate(e.target.value)}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11"
+                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1">Número de visitantes</label>
                     <input
                       type="number"
+                      disabled={bookingLoading || Boolean(pendingBookingId)}
                       min={1}
-                      max={checkoutExp.max_capacity}
+                      max={maxCap}
                       value={guests}
-                      onChange={(e) => setGuests(Number(e.target.value))}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11"
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (Number.isNaN(val)) return;
+                        setGuests(Math.min(maxCap, Math.max(1, val)));
+                      }}
+                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
                     />
                   </div>
                   <div>
@@ -1119,38 +1404,55 @@ export default function App() {
                       Notas de accesibilidad (opcional)
                     </label>
                     <input
+                      disabled={bookingLoading || Boolean(pendingBookingId)}
                       placeholder="Ej. Acceso a nivel de embarcadero"
                       value={accessNotes}
                       onChange={(e) => setAccessNotes(e.target.value)}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11"
+                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-11 disabled:opacity-60"
                     />
                   </div>
-                  <div className="pt-3 border-t border-border flex justify-between font-bold">
-                    <span>Total (+ $50 fondo ambiental)</span>
-                    <span>${checkoutExp.price * guests + 50} MXN</span>
+                  <div className="pt-3 border-t border-border space-y-1 text-xs">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Subtotal ({guests} visitante{guests === 1 ? "" : "s"})</span>
+                      <span>${baseAmount.toFixed(2)} MXN</span>
+                    </div>
+                    <div className="flex justify-between text-[#728C69]">
+                      <span>Fondo ambiental (5%)</span>
+                      <span>${impactAmount.toFixed(2)} MXN</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-sm pt-1">
+                      <span>Total</span>
+                      <span>${totalAmount.toFixed(2)} MXN</span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setCheckoutExp(null)}
-                    className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl h-11 text-sm font-medium"
+                    disabled={bookingLoading}
+                    onClick={handleCancelCheckoutModal}
+                    className="flex-1 bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl h-11 text-sm font-medium disabled:opacity-50"
                   >
-                    Cancelar
+                    {pendingBookingId ? "Cancelar reserva" : "Cancelar"}
                   </button>
                   <button
                     disabled={bookingLoading}
                     onClick={handlePayBooking}
-                    className="flex-1 bg-[#C81D77] hover:bg-[#A91864] text-white rounded-xl h-11 text-sm font-medium"
+                    className="flex-1 bg-[#C81D77] hover:bg-[#A91864] text-white rounded-xl h-11 text-sm font-medium disabled:opacity-50"
                   >
-                    {bookingLoading ? "Validando cupo..." : "Confirmar y Pagar"}
+                    {bookingLoading
+                      ? "Procesando..."
+                      : pendingBookingId
+                      ? "Reintentar Pago"
+                      : "Confirmar y Pagar"}
                   </button>
                 </div>
               </>
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

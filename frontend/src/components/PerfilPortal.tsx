@@ -26,21 +26,79 @@ export default function PerfilPortal({
 }: PerfilPortalProps) {
   const [subView, setSubView] = useState<"perfil" | "favoritos">("perfil");
   const [reservasCount, setReservasCount] = useState(0);
+  const [totalImpactFund, setTotalImpactFund] = useState(0);
+  const [profileName, setProfileName] = useState<string | null>(null);
   const [intereses, setIntereses] = useState<string[]>([
     "Naturaleza",
     "Cultura",
     "Ecoturismo",
     "Pet Friendly",
   ]);
+  const [accessibilityNeeds, setAccessibilityNeeds] = useState<string[]>([]);
   const [nuevoInteres, setNuevoInteres] = useState("");
+  const [nuevaAccesibilidad, setNuevaAccesibilidad] = useState("");
   const [editandoIntereses, setEditandoIntereses] = useState(false);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const [prefsMsg, setPrefsMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     if (!session.token) return;
     apiFetch<any[]>("/api/bookings/reservations/my-bookings")
-      .then((list) => setReservasCount(Array.isArray(list) ? list.length : 0))
-      .catch(() => setReservasCount(0));
+      .then((list) => {
+        const bookings = Array.isArray(list) ? list : [];
+        setReservasCount(bookings.length);
+        const impactSum = bookings.reduce((sum, b) => {
+          const status = String(b.status || "").toUpperCase();
+          if (!["CONFIRMED", "PAID", "COMPLETED"].includes(status)) return sum;
+          if (typeof b.impact_contribution === "number") {
+            return sum + b.impact_contribution;
+          }
+          const total = Number(b.total_amount || 0);
+          return sum + Number(((total / 1.05) * 0.05).toFixed(2));
+        }, 0);
+        setTotalImpactFund(Number(impactSum.toFixed(2)));
+      })
+      .catch(() => {
+        setReservasCount(0);
+        setTotalImpactFund(0);
+      });
+
+    apiFetch<any>("/api/auth/users/me")
+      .then((me) => {
+        if (me?.full_name) setProfileName(me.full_name);
+        if (Array.isArray(me?.travel_interests) && me.travel_interests.length > 0) {
+          setIntereses(me.travel_interests);
+        }
+        if (Array.isArray(me?.accessibility_needs)) {
+          setAccessibilityNeeds(me.accessibility_needs);
+        }
+      })
+      .catch(() => {});
   }, [session.token]);
+
+  const handleSavePreferences = async () => {
+    if (session.role?.toUpperCase() !== "TOURIST") {
+      setEditandoIntereses(false);
+      return;
+    }
+    setSavingPrefs(true);
+    setPrefsMsg(null);
+    try {
+      await apiFetch("/api/auth/users/preferences", {
+        method: "PUT",
+        body: JSON.stringify({
+          travel_interests: intereses,
+          accessibility_needs: accessibilityNeeds,
+        }),
+      });
+      setPrefsMsg({ type: "ok", text: "Preferencias guardadas correctamente." });
+      setEditandoIntereses(false);
+    } catch (err: any) {
+      setPrefsMsg({ type: "err", text: err.message || "Error al guardar preferencias" });
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
 
   const getInitials = (name?: string | null) => {
     if (!name) return "TS";
@@ -119,6 +177,7 @@ export default function PerfilPortal({
                   key={exp.id}
                   actividad={exp}
                   isFavorite={true}
+                  canReserve={session.role?.toUpperCase() === "TOURIST"}
                   onToggleFavorite={onToggleFavorite}
                   onReservar={onReservar}
                   onVerDetalle={onVerDetalle}
@@ -139,21 +198,29 @@ export default function PerfilPortal({
         <div className="flex items-center justify-between mb-8">
           <h1 className="font-serif text-3xl text-[#1E201D] dark:text-white">Mi perfil</h1>
           <button
-            onClick={() => setEditandoIntereses(!editandoIntereses)}
-            className="text-[#C81D77] dark:text-[#E24A96] text-sm font-medium hover:underline"
+            disabled={savingPrefs}
+            onClick={() => {
+              if (editandoIntereses) {
+                handleSavePreferences();
+              } else {
+                setPrefsMsg(null);
+                setEditandoIntereses(true);
+              }
+            }}
+            className="text-[#C81D77] dark:text-[#E24A96] text-sm font-medium hover:underline disabled:opacity-50"
           >
-            {editandoIntereses ? "Listo" : "Preferencias"}
+            {savingPrefs ? "Guardando..." : editandoIntereses ? "Guardar" : "Preferencias"}
           </button>
         </div>
 
         {/* Info de Usuario */}
         <div className="flex items-center gap-4 mb-8">
           <div className="w-20 h-20 rounded-full bg-[#728C69] flex items-center justify-center text-white font-serif text-2xl flex-shrink-0 shadow-sm">
-            {getInitials(session.name)}
+            {getInitials(profileName || session.name)}
           </div>
           <div>
             <h2 className="text-xl font-medium text-[#1E201D] dark:text-white">
-              {session.name || "Turista Sustentable"}
+              {profileName || session.name || "Turista Sustentable"}
             </h2>
             <p className="text-xs text-[#728C69] dark:text-[#A5B29A] font-medium mt-1 uppercase tracking-wider">
               {session.role || "Viajero consciente"} · CDMX
@@ -165,11 +232,11 @@ export default function PerfilPortal({
         <div className="bg-white dark:bg-[#2A312C] rounded-[1.5rem] p-5 mb-8 shadow-sm border border-transparent dark:border-white/5 flex justify-between items-center">
           <div>
             <h3 className="text-sm font-bold text-[#1E201D] dark:text-white mb-1">
-              Tu impacto positivo
+              Tu impacto positivo (5% por reserva)
             </h3>
             <p className="text-xs text-[#63665E] dark:text-[#A5B29A]">
               {reservasCount} experiencia{reservasCount === 1 ? "" : "s"} reservada
-              {reservasCount === 1 ? "" : "s"} · ${reservasCount * 50} MXN al fondo ambiental
+              {reservasCount === 1 ? "" : "s"} · ${totalImpactFund.toFixed(2)} MXN al fondo ambiental
             </p>
           </div>
           <div className="text-center flex flex-col items-center">
@@ -235,30 +302,85 @@ export default function PerfilPortal({
           ))}
         </div>
 
-        {editandoIntereses && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (nuevoInteres.trim()) {
-                setIntereses([...intereses, nuevoInteres.trim()]);
-                setNuevoInteres("");
-              }
-            }}
-            className="flex gap-2 mb-8"
+        {prefsMsg && (
+          <p
+            className={`text-xs mb-4 ${
+              prefsMsg.type === "ok" ? "text-green-700 dark:text-green-300" : "text-red-600"
+            }`}
           >
-            <input
-              value={nuevoInteres}
-              onChange={(e) => setNuevoInteres(e.target.value)}
-              placeholder="Añadir interés (ej. Senderismo)"
-              className="flex-1 bg-white dark:bg-[#2A312C] rounded-xl px-3 h-10 text-xs"
-            />
-            <button
-              type="submit"
-              className="bg-[#728C69] text-white text-xs px-4 rounded-xl font-medium"
+            {prefsMsg.text}
+          </p>
+        )}
+
+        {editandoIntereses && (
+          <div className="space-y-4 mb-8">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (nuevoInteres.trim()) {
+                  setIntereses([...intereses, nuevoInteres.trim()]);
+                  setNuevoInteres("");
+                }
+              }}
+              className="flex gap-2"
             >
-              Agregar
-            </button>
-          </form>
+              <input
+                value={nuevoInteres}
+                onChange={(e) => setNuevoInteres(e.target.value)}
+                placeholder="Añadir interés (ej. Senderismo)"
+                className="flex-1 bg-white dark:bg-[#2A312C] rounded-xl px-3 h-10 text-xs"
+              />
+              <button
+                type="submit"
+                className="bg-[#728C69] text-white text-xs px-4 rounded-xl font-medium"
+              >
+                Agregar
+              </button>
+            </form>
+
+            <div>
+              <h4 className="text-xs font-semibold text-[#63665E] dark:text-[#A5B29A] mb-2">
+                Necesidades de accesibilidad
+              </h4>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {accessibilityNeeds.map((need, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() =>
+                      setAccessibilityNeeds(accessibilityNeeds.filter((_, i) => i !== idx))
+                    }
+                    className="bg-[#E3E5D8] dark:bg-[#3D453F] text-[#4A4D46] dark:text-[#D1D5CD] text-xs font-medium px-3 py-1.5 rounded-full"
+                  >
+                    {need} ×
+                  </button>
+                ))}
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (nuevaAccesibilidad.trim()) {
+                    setAccessibilityNeeds([...accessibilityNeeds, nuevaAccesibilidad.trim()]);
+                    setNuevaAccesibilidad("");
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  value={nuevaAccesibilidad}
+                  onChange={(e) => setNuevaAccesibilidad(e.target.value)}
+                  placeholder="Ej. Rampas, señalética braille..."
+                  className="flex-1 bg-white dark:bg-[#2A312C] rounded-xl px-3 h-10 text-xs"
+                />
+                <button
+                  type="submit"
+                  className="bg-[#728C69] text-white text-xs px-4 rounded-xl font-medium"
+                >
+                  Agregar
+                </button>
+              </form>
+            </div>
+          </div>
         )}
 
         {/* Experiencias y Exploración */}

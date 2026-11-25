@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     redis_url: str
     rabbitmq_url: str
-    stripe_api_key: str
+    stripe_api_key: str = ""
     catalog_service_url: str = "http://catalog-service:8000"
 
 

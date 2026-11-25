@@ -1,9 +1,13 @@
 const { S3Client, HeadBucketCommand, CreateBucketCommand } = require('@aws-sdk/client-s3');
 const settings = require('./settings');
 
+// Normalizar endpoint de MinIO/RustFS conservando esquema si ya existe
+const rawEndpoint = (settings.minioEndpoint || 'minio:9000').trim();
+const normalizedEndpoint = /^https?:\/\//i.test(rawEndpoint) ? rawEndpoint : `http://${rawEndpoint}`;
+
 // Inicializar cliente compatible con S3 apuntando a RustFS/MinIO
 const s3Client = new S3Client({
-    endpoint: `http://${settings.minioEndpoint}`,
+    endpoint: normalizedEndpoint,
     region: 'us-east-1',
     credentials: {
         accessKeyId: settings.minioAccessKey,
@@ -17,6 +21,15 @@ const ensureBucketExists = async () => {
     try {
         await s3Client.send(new HeadBucketCommand({ Bucket: settings.s3BucketName }));
     } catch (error) {
+        const isNotFound =
+            error?.$metadata?.httpStatusCode === 404 ||
+            error?.name === 'NotFound' ||
+            error?.name === 'NoSuchBucket';
+
+        if (!isNotFound) {
+            throw error;
+        }
+
         await s3Client.send(new CreateBucketCommand({ Bucket: settings.s3BucketName }));
     }
 };

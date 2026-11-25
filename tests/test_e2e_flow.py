@@ -21,19 +21,29 @@ def run_end_to_end_verification() -> None:
         password = "Password123!"
 
         # =========================================================
-        # 1. REGISTRO Y LOGIN DE LOS 3 ROLES (ADMIN, PROVIDER, TOURIST)
+        # 0. HEALTH CHECK DE AUTH-USERS
+        # =========================================================
+        health_res = client.get("/api/auth/health")
+        assert health_res.status_code == 200, f"Fallo healthcheck auth-users: {health_res.text}"
+        print("[OK] 0. Healthcheck /api/auth/health devolvio 200.")
+
+        # =========================================================
+        # 1. REGISTRO (BLOQUEO ADMIN) Y LOGIN DE LOS 3 ROLES
         # =========================================================
         admin_email = f"admin_{suffix}@ts.mx"
         prov_email = f"prov_{suffix}@ts.mx"
         tour_email = f"turista_{suffix}@ts.mx"
 
+        # Verificar que registrar ADMIN publicamente falla con 422 (bloqueo escalacion)
         admin_res = client.post("/api/auth/users/register", json={
             "email": admin_email,
             "password": password,
             "full_name": "Ana Martinez (Admin)",
             "role": "ADMIN",
         })
-        assert admin_res.status_code == 201, f"Fallo registro admin: {admin_res.text}"
+        assert admin_res.status_code == 422, (
+            f"Se esperaba 422 al registrar ADMIN publicamente, se obtuvo {admin_res.status_code}: {admin_res.text}"
+        )
 
         prov_res = client.post("/api/auth/users/register", json={
             "email": prov_email,
@@ -44,6 +54,7 @@ def run_end_to_end_verification() -> None:
             "rfc": f"CVI{str(suffix)[-6:]}ABC",
         })
         assert prov_res.status_code == 201, f"Fallo registro proveedor: {prov_res.text}"
+        prov_user_id = prov_res.json()["user_id"]
 
         tour_res = client.post("/api/auth/users/register", json={
             "email": tour_email,
@@ -53,11 +64,11 @@ def run_end_to_end_verification() -> None:
         })
         assert tour_res.status_code == 201, f"Fallo registro turista: {tour_res.text}"
 
-        # Verificar endpoint /users/login para los 3 roles
-        admin_token = login_and_get_token(client, admin_email, password)
+        # Verificar endpoint /users/login para los 3 roles (ADMIN con cuenta seeded)
+        admin_token = login_and_get_token(client, "admin@turismosustentable.mx", "AdminTS2026!")
         prov_token = login_and_get_token(client, prov_email, password)
         tour_token = login_and_get_token(client, tour_email, password)
-        print("[OK] 1. Registro y /users/login verificados para ADMIN, PROVIDER y TOURIST.")
+        print("[OK] 1. Registro ADMIN bloqueado (422) y /users/login verificados para ADMIN (seeded), PROVIDER y TOURIST.")
 
         # =========================================================
         # 2. ROL PROVEEDOR: SUBIR EVIDENCIAS Y CONTROL DE PERMISOS
@@ -151,10 +162,22 @@ def run_end_to_end_verification() -> None:
             json={"message": "Busco algo de naturaleza y accesible para ir con mi perro"},
         )
         assert ai_res.status_code == 200, f"Fallo asistente IA: {ai_res.text}"
-        print(f"[OK] 5. [TOURIST] Catalogo verificado y Guia IA respondio correctamente.")
+
+        rec_res = client.post(
+            "/api/ai/assistant/recommendations",
+            json={
+                "travel_interests": ["Naturaleza", "Ecoturismo"],
+                "preferred_borough": "Xochimilco",
+                "requires_accessibility": True,
+                "with_pets": True,
+                "max_budget": 1000.0,
+            },
+        )
+        assert rec_res.status_code == 200, f"Fallo recomendaciones IA: {rec_res.text}"
+        print("[OK] 5. [TOURIST] Catalogo verificado, Guia IA y /recommendations respondieron correctamente.")
 
         # =========================================================
-        # 6. ROL TURISTA: RESERVA, CONTROL DE SOBRECUPO REDIS Y PAGO
+        # 6. ROL TURISTA: RESERVA (ANTI-MANIPULACION PRECIO), SOBRECUPO REDIS Y PAGO
         # =========================================================
         reserve_res = client.post(
             "/api/bookings/reservations/reserve",
@@ -164,12 +187,17 @@ def run_end_to_end_verification() -> None:
                 "activity_date": "2026-12-15",
                 "guests_count": 3,
                 "accessibility_notes": "Acceso a nivel de embarcadero",
-                "unit_price": 650.0,
+                "unit_price": 0.0,
                 "max_ecological_capacity": 4,
             },
         )
         assert reserve_res.status_code == 201, f"Fallo pre-reserva: {reserve_res.text}"
-        booking_id = reserve_res.json()["booking_id"]
+        reserve_data = reserve_res.json()
+        booking_id = reserve_data["booking_id"]
+        expected_total = round(650.0 * 3 * 1.05, 2)
+        assert abs(float(reserve_data["total_amount"]) - expected_total) < 0.01, (
+            f"Manipulacion de precio detectada: se esperaba {expected_total}, se obtuvo {reserve_data['total_amount']}"
+        )
 
         # Intentar reservar 2 lugares mas (3 + 2 = 5 > 4 capacidad maxima ecologica)
         overcap_res = client.post(
@@ -243,6 +271,27 @@ def run_end_to_end_verification() -> None:
         rev_data = get_reviews_res.json()
         assert rev_data["total_reviews"] >= 1 and rev_data["average_rating"] == 5.0
         print(f"[OK] 8. [SOCIAL] Resena con foto subida a RustFS y promedio verificado: {rev_data['average_rating']}/5.")
+
+        # =========================================================
+        # 9. CHAT DIRECTO TURISTA <-> PROVEEDOR Y CONVERSACIONES
+        # =========================================================
+        chat_send_res = client.post(
+            "/api/social/chat/send",
+            headers={"Authorization": f"Bearer {tour_token}"},
+            json={
+                "experienceId": exp_id,
+                "recipientId": prov_user_id,
+                "content": "Hola, cuentan con chalecos salvavidas para mascotas?",
+            },
+        )
+        assert chat_send_res.status_code in (200, 201), f"Fallo envio de mensaje chat: {chat_send_res.text}"
+
+        conv_res = client.get(
+            "/api/social/chat/conversations",
+            headers={"Authorization": f"Bearer {prov_token}"},
+        )
+        assert conv_res.status_code == 200, f"Fallo consulta conversaciones: {conv_res.text}"
+        print("[OK] 9. [SOCIAL] Chat directo y listado de conversaciones verificados.")
         
 if __name__ == "__main__":
     run_end_to_end_verification()
