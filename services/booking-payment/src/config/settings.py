@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     redis_url: str
     rabbitmq_url: str
     stripe_api_key: str = ""
+    stripe_webhook_secret: str = ""
+    frontend_url: str = "http://localhost"
     catalog_service_url: str = "http://catalog-service:8000"
 
 

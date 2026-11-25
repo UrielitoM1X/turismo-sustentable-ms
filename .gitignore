@@ -1,20 +1,49 @@
-# Ignorar variables de entorno reales
+# Variables de entorno y secretos locales
 .env
+.env.*
+!.env.example
 
-# Ignorar dependencias y entornos virtuales
+# Salidas de compilacion (Vite / TypeScript / Frontend)
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Herramientas de analisis / IA locales
+repomix-output.*
+.gga
+
+# Dependencias y entornos virtuales
 node_modules/
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
+*.egg-info/
 
-# Ignorar archivos de sistema operativo y editores
+# Pruebas, cobertura y caches de linters
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Sistema operativo y editores
 .DS_Store
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
+.idea/
 
-# Ignorar datos locales temporales
+# Datos locales temporales
 pg_data/
 mongo_data/
 redis_data/

@@ -1,76 +1,115 @@
-import { httpRequest } from '../httpClient';
+import { fetchAuthorizedBlob, httpRequest } from "../httpClient";
 
 export interface Experience {
-    id: number;
-    provider_id: number;
-    title: string;
-    category: string;
-    borough_cdmx: string;
-    duration_minutes: number;
-    price: number;
-    max_capacity: number;
-    pet_friendly: boolean;
-    accessible: boolean;
+  id: number;
+  provider_id?: number;
+  title: string;
+  description?: string;
+  category: string;
+  borough_cdmx: string;
+  duration_minutes: number;
+  price: number;
+  max_capacity: number;
+  sustainable_practices?: string;
+  pet_friendly?: boolean;
+  accessible?: boolean;
+  average_rating?: number;
+  is_active?: boolean;
 }
 
-export interface PendingAudit {
-    id: number;
-    provider_id: number;
-    business_name: string;
-    category: string;
-    description: string;
-    created_at: string;
+export interface CreateExperiencePayload {
+  title: string;
+  description: string;
+  category: string;
+  borough_cdmx: string;
+  latitude: number;
+  longitude: number;
+  price: number;
+  duration_minutes: number;
+  max_capacity: number;
+  pet_friendly: boolean;
+  accessible: boolean;
+  sustainable_practices: string;
+}
+
+export interface AuditFile {
+  id: number;
+  file_name: string;
+  file_type: string;
+}
+
+export interface AuditSubmission {
+  id: number;
+  provider_id: number;
+  business_name: string;
+  category: string;
+  description: string;
+  status?: string;
+  reviewer_notes?: string;
+  files_count?: number;
+  files?: AuditFile[];
+  created_at?: string;
 }
 
 export const catalogService = {
-    // Buscar experiencias activas aplicando filtros opcionales
-    async searchExperiences(filters: {
-        q?: string;
-        category?: string;
-        borough?: string;
-        pet_friendly?: boolean;
-        accessible?: boolean;
-    } = {}): Promise<Experience[]> {
-        const params = new URLSearchParams();
-        Object.entries(filters).forEach(([key, value]) => {
-            if (value !== undefined && value !== '') {
-                params.append(key, String(value));
-            }
-        });
-        const queryString = params.toString() ? `?${params.toString()}` : '';
-        return httpRequest<Experience[]>(`/api/catalog/experiences/${queryString}`);
-    },
+  async getExperiences(): Promise<Experience[]> {
+    const data = await httpRequest<Experience[]>("/api/catalog/experiences/");
+    return Array.isArray(data) ? data : [];
+  },
 
-    // Subir documentos PDF y fotografias de evidencia ambiental como proveedor
-    async submitAuditEvidence(
-        businessName: string,
-        category: string,
-        description: string,
-        files: File[]
-    ): Promise<{ audit_id: number; status: string }> {
-        const formData = new FormData();
-        formData.append('business_name', businessName);
-        formData.append('category', category);
-        formData.append('description', description);
-        files.forEach((file) => formData.append('files', file));
+  async getMyExperiences(): Promise<Experience[]> {
+    const data = await httpRequest<Experience[]>("/api/catalog/experiences/mine");
+    return Array.isArray(data) ? data : [];
+  },
 
-        return httpRequest('/api/catalog/audits/submit', {
-            method: 'POST',
-            body: formData,
-        });
-    },
+  async createExperience(payload: CreateExperiencePayload): Promise<Experience> {
+    return httpRequest<Experience>("/api/catalog/experiences/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
 
-    // Listar auditorias pendientes para el panel del administrador
-    async getPendingAudits(category?: string): Promise<PendingAudit[]> {
-        const query = category ? `?category=${encodeURIComponent(category)}` : '';
-        return httpRequest<PendingAudit[]>(`/api/catalog/audits/pending${query}`);
-    },
+  async submitAuditEvidence(
+    businessName: string,
+    category: string,
+    description: string,
+    files: File[]
+  ): Promise<{ audit_id: number; status?: string }> {
+    const formData = new FormData();
+    formData.append("business_name", businessName);
+    formData.append("category", category);
+    formData.append("description", description);
+    files.forEach((file) => formData.append("files", file));
 
-    // Emitir aprobacion o rechazo tecnico sobre una auditoria
-    async resolveAudit(auditId: number, decision: 'APPROVED' | 'REJECTED', notes?: string): Promise<void> {
-        await httpRequest(`/api/catalog/audits/${auditId}/decision`, {
-            method: 'PATCH',
-            body: JSON.stringify({ decision, reviewer_notes: notes }),
-        });
-    },
+    return httpRequest<{ audit_id: number; status?: string }>("/api/catalog/audits/submit", {
+      method: "POST",
+      body: formData,
+    });
+  },
+
+  async getMyAudits(): Promise<AuditSubmission[]> {
+    const data = await httpRequest<AuditSubmission[]>("/api/catalog/audits/my-audits");
+    return Array.isArray(data) ? data : [];
+  },
+
+  async getPendingAudits(category?: string): Promise<AuditSubmission[]> {
+    const query = category ? `?category=${encodeURIComponent(category)}` : "";
+    const data = await httpRequest<AuditSubmission[]>(`/api/catalog/audits/pending${query}`);
+    return Array.isArray(data) ? data : [];
+  },
+
+  async resolveAudit(
+    auditId: number,
+    decision: "APPROVED" | "REJECTED",
+    notes?: string
+  ): Promise<void> {
+    await httpRequest(`/api/catalog/audits/${auditId}/decision`, {
+      method: "PATCH",
+      body: JSON.stringify({ decision, reviewer_notes: notes }),
+    });
+  },
+
+  async fetchAuditFileBlob(fileId: number): Promise<Blob> {
+    return fetchAuthorizedBlob(`/api/catalog/audits/files/${fileId}`);
+  },
 };

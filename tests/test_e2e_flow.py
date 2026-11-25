@@ -179,6 +179,10 @@ def run_end_to_end_verification() -> None:
         # =========================================================
         # 6. ROL TURISTA: RESERVA (ANTI-MANIPULACION PRECIO), SOBRECUPO REDIS Y PAGO
         # =========================================================
+        pay_cfg_res = client.get("/api/bookings/reservations/payment-config")
+        assert pay_cfg_res.status_code == 200, f"Fallo payment-config: {pay_cfg_res.text}"
+        assert pay_cfg_res.json().get("provider") in ("stripe", "simulated")
+
         reserve_res = client.post(
             "/api/bookings/reservations/reserve",
             headers={"Authorization": f"Bearer {tour_token}"},
@@ -230,7 +234,33 @@ def run_end_to_end_verification() -> None:
             headers={"Authorization": f"Bearer {tour_token}"},
         )
         assert my_bookings_res.status_code == 200 and len(my_bookings_res.json()) >= 1
-        print(f"[OK] 6. [TOURIST] Reserva pagada ({access_code}), historial validado y sobrecupo bloqueado.")
+
+        # Verificar reserva con desglose por tipo de cliente (tarifas preferenciales en servidor)
+        breakdown_res = client.post(
+            "/api/bookings/reservations/reserve",
+            headers={"Authorization": f"Bearer {tour_token}"},
+            json={
+                "experience_id": exp_id,
+                "activity_date": "2026-12-16",
+                "guest_breakdown": {
+                    "adults": 1,
+                    "children": 1,
+                    "seniors": 1,
+                    "students": 1,
+                },
+                "accessibility_notes": "Grupo familiar con adulto mayor",
+            },
+        )
+        assert breakdown_res.status_code == 201, f"Fallo reserva con guest_breakdown: {breakdown_res.text}"
+        breakdown_data = breakdown_res.json()
+        expected_breakdown_total = round(650.0 * (1.0 + 0.5 + 0.7 + 0.8) * 1.05, 2)
+        assert abs(float(breakdown_data["total_amount"]) - expected_breakdown_total) < 0.01, (
+            f"Calculo por tipo de cliente incorrecto: se esperaba {expected_breakdown_total}, "
+            f"se obtuvo {breakdown_data['total_amount']}"
+        )
+        assert breakdown_data["guests_count"] == 4
+        assert breakdown_data["guest_breakdown"]["seniors"] == 1
+        print(f"[OK] 6. [TOURIST] Reserva pagada ({access_code}), desglose por tipo de cliente validado y sobrecupo bloqueado.")
 
         # =========================================================
         # 7. ROL ADMIN: PANEL BI Y PROTECCION DE ACCESO

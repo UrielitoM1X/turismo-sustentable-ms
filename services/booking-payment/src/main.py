@@ -22,6 +22,22 @@ async def lifespan(app: FastAPI):
             if engine.dialect.name == "postgresql":
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;"))
+                    conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS adults_count INTEGER NOT NULL DEFAULT 1;"))
+                    conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS children_count INTEGER NOT NULL DEFAULT 0;"))
+                    conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS seniors_count INTEGER NOT NULL DEFAULT 0;"))
+                    conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS students_count INTEGER NOT NULL DEFAULT 0;"))
+                    conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_breakdown JSON;"))
+                    conn.execute(text("""
+                        UPDATE bookings
+                        SET adults_count = guests_count,
+                            guest_breakdown = json_build_object(
+                                'adults', guests_count,
+                                'children', 0,
+                                'seniors', 0,
+                                'students', 0
+                            )
+                        WHERE guest_breakdown IS NULL;
+                    """))
             break
         except Exception as exc:
             logger.warning("Intento %s/%s de inicializar BD fallo: %s", attempt, max_attempts, exc)

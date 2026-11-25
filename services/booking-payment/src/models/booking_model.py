@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, UniqueConstraint, JSON
 from sqlalchemy.sql import func
 from src.config.database import Base
 
@@ -6,12 +6,17 @@ from src.config.database import Base
 class Booking(Base):
     __tablename__ = "bookings"
 
-    # Registrar reservacion con desglose de impacto y codigo de acceso
+    # Registrar reservacion con desglose de tipos de cliente, impacto y codigo de acceso
     id = Column(Integer, primary_key=True, index=True)
     tourist_id = Column(Integer, index=True, nullable=False)
     experience_id = Column(Integer, index=True, nullable=False)
     activity_date = Column(Date, index=True, nullable=False)
     guests_count = Column(Integer, nullable=False)
+    adults_count = Column(Integer, nullable=False, default=1, server_default="1")
+    children_count = Column(Integer, nullable=False, default=0, server_default="0")
+    seniors_count = Column(Integer, nullable=False, default=0, server_default="0")
+    students_count = Column(Integer, nullable=False, default=0, server_default="0")
+    guest_breakdown = Column(JSON, nullable=True)
     accessibility_notes = Column(Text, nullable=True)
     base_amount = Column(Numeric(10, 2, asdecimal=False), nullable=False)
     impact_contribution = Column(Numeric(10, 2, asdecimal=False), nullable=False)

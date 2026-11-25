@@ -20,6 +20,11 @@ class BookingConfirmedEvent(BaseModel):
     tourist_id: int = Field(gt=0)
     experience_id: int = Field(gt=0)
     guests_count: int = Field(default=1, gt=0)
+    adults_count: Optional[int] = Field(default=None, ge=0)
+    children_count: Optional[int] = Field(default=None, ge=0)
+    seniors_count: Optional[int] = Field(default=None, ge=0)
+    students_count: Optional[int] = Field(default=None, ge=0)
+    guest_breakdown: Optional[dict[str, int]] = None
     total_amount: float = Field(ge=0)
     impact_contribution: float = Field(default=0.0, ge=0)
     provider_id: Optional[int] = Field(default=None, ge=0)
@@ -65,6 +70,28 @@ def _handle_booking_confirmed(ch, method, properties, body) -> None:
                 provider_id = event.provider_id if (event.provider_id and event.provider_id > 0) else fetched_provider_id
                 category = event.category if event.category else fetched_category
 
+            breakdown = event.guest_breakdown or {}
+            adults_count = (
+                event.adults_count
+                if event.adults_count is not None
+                else int(breakdown.get("adults", event.guests_count))
+            )
+            children_count = (
+                event.children_count
+                if event.children_count is not None
+                else int(breakdown.get("children", 0))
+            )
+            seniors_count = (
+                event.seniors_count
+                if event.seniors_count is not None
+                else int(breakdown.get("seniors", 0))
+            )
+            students_count = (
+                event.students_count
+                if event.students_count is not None
+                else int(breakdown.get("students", 0))
+            )
+
             record = BookingMetricRecord(
                 booking_id=event.booking_id,
                 tourist_id=event.tourist_id,
@@ -72,6 +99,10 @@ def _handle_booking_confirmed(ch, method, properties, body) -> None:
                 provider_id=provider_id,
                 category=category,
                 guests_count=event.guests_count,
+                adults_count=adults_count,
+                children_count=children_count,
+                seniors_count=seniors_count,
+                students_count=students_count,
                 total_amount=event.total_amount,
                 impact_contribution=event.impact_contribution,
             )

@@ -1,63 +1,151 @@
-// Definir clase personalizada para manejar errores estructurados de la API
-export class ApiError extends Error {
-    status: number;
-    detail: string;
+const TOKEN_KEY = "ts_access_token";
+const ROLE_KEY = "ts_user_role";
+const NAME_KEY = "ts_user_name";
+const USER_ID_KEY = "ts_user_id";
 
-    constructor(status: number, detail: string) {
-        super(detail);
-        this.status = status;
-        this.detail = detail;
-    }
+export interface UserSession {
+  token: string | null;
+  role: string | null;
+  name: string | null;
+  userId: number | null;
 }
 
-// Obtener token JWT almacenado localmente
-export const getAuthToken = (): string | null => {
-    return localStorage.getItem('ts_access_token');
-};
+export class ApiError extends Error {
+  status: number;
+  detail: string;
 
-// Guardar o eliminar sesion del usuario en almacenamiento local
-export const setAuthSession = (token: string, role: string, userId: number): void => {
-    localStorage.setItem('ts_access_token', token);
-    localStorage.setItem('ts_user_role', role);
-    localStorage.setItem('ts_user_id', String(userId));
-};
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
 
-export const clearAuthSession = (): void => {
-    localStorage.removeItem('ts_access_token');
-    localStorage.removeItem('ts_user_role');
-    localStorage.removeItem('ts_user_id');
-};
+export function decodeJwtPayload(token: string | null): Record<string, any> | null {
+  if (!token) return null;
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
+    const jsonStr = decodeURIComponent(
+      atob(padded)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
 
-// Ejecutar peticion HTTP con inyeccion automatica de credenciales
-export async function httpRequest<T>(
-    endpoint: string,
-    options: RequestInit = {}
+export function getAuthToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getUserSession(): UserSession {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) {
+    return { token: null, role: null, name: null, userId: null };
+  }
+
+  const payload = decodeJwtPayload(token);
+  if (!payload || (typeof payload.exp === "number" && payload.exp * 1000 <= Date.now())) {
+    clearUserSession();
+    return { token: null, role: null, name: null, userId: null };
+  }
+
+  const role =
+    typeof payload.role === "string" ? payload.role : localStorage.getItem(ROLE_KEY);
+  const rawSub =
+    payload.sub !== undefined && payload.sub !== null
+      ? Number(payload.sub)
+      : localStorage.getItem(USER_ID_KEY)
+      ? Number(localStorage.getItem(USER_ID_KEY))
+      : null;
+  const userId = rawSub !== null && Number.isFinite(rawSub) ? rawSub : null;
+
+  return {
+    token,
+    role,
+    name: localStorage.getItem(NAME_KEY),
+    userId,
+  };
+}
+
+export function saveUserSession(
+  token: string,
+  role: string,
+  name?: string,
+  userId?: number
+): void {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(ROLE_KEY, role);
+  if (name) localStorage.setItem(NAME_KEY, name);
+  if (typeof userId === "number" && Number.isFinite(userId)) {
+    localStorage.setItem(USER_ID_KEY, String(userId));
+  }
+}
+
+export function clearUserSession(): void {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ROLE_KEY);
+  localStorage.removeItem(NAME_KEY);
+  localStorage.removeItem(USER_ID_KEY);
+}
+
+export async function httpRequest<T = any>(
+  endpoint: string,
+  options: RequestInit = {}
 ): Promise<T> {
-    const token = getAuthToken();
-    const headers = new Headers(options.headers || {});
+  const token = getAuthToken();
+  const headers = new Headers(options.headers || {});
 
-    // Asignar JSON por defecto salvo cuando se envian archivos FormData
-    if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
-        headers.set('Content-Type', 'application/json');
+  if (!(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(endpoint, {
+    ...options,
+    headers,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearUserSession();
     }
-
-    if (token) {
-        headers.set('Authorization', `Bearer ${token}`);
+    if (response.status === 413) {
+      throw new ApiError(
+        413,
+        "Los archivos superan el tamaño máximo permitido (máx. 10 MB por archivo)."
+      );
     }
+    const detail = Array.isArray(data.detail)
+      ? data.detail[0]?.msg || "Error de validación"
+      : data.detail || `Error ${response.status}`;
+    throw new ApiError(response.status, detail);
+  }
 
-    const response = await fetch(endpoint, {
-        ...options,
-        headers,
-    });
+  return data as T;
+}
 
-    const data = await response.json().catch(() => ({}));
+export async function fetchAuthorizedBlob(endpoint: string): Promise<Blob> {
+  const token = getAuthToken();
+  const response = await fetch(endpoint, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
 
-    if (!response.ok) {
-        if (response.status === 401) {
-            clearAuthSession();
-        }
-        throw new ApiError(response.status, data.detail || 'Error inesperado en el servidor');
-    }
+  if (!response.ok) {
+    throw new ApiError(response.status, "Could not open file");
+  }
 
-    return data as T;
+  return response.blob();
 }
