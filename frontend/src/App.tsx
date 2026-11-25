@@ -4,23 +4,25 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
-  UploadCloud,
   MapPin,
   Clock,
   Users,
   Leaf,
   X,
+  Star,
+  Camera,
 } from "lucide-react";
 import Header, { RouteView } from "./components/Header";
 import HomePage from "./pages/HomePage";
 import TarjetaActividad, { ActividadItem } from "./components/TarjetaActividad";
 import AuthViews from "./components/AuthViews";
+import { ProviderPortal, AdminAuditsPortal } from "./components/RoleDashboards";
+import PerfilPortal from "./components/PerfilPortal";
 import {
   apiFetch,
   getUserSession,
   clearUserSession,
 } from "./api/client";
-import { ProviderPortal, AdminAuditsPortal } from "./components/RoleDashboards";
 
 export default function App() {
   const [view, setView] = useState<RouteView>("home");
@@ -35,8 +37,46 @@ export default function App() {
   const [onlyPetFriendly, setOnlyPetFriendly] = useState(false);
   const [onlyAccessible, setOnlyAccessible] = useState(false);
 
-  // Detalle y Checkout
+  // Favoritos persistentes por usuario
+  const favKey = `ts_favs_${session.name || "guest"}`;
+  const [favoriteIds, setFavoriteIds] = useState<number[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(favKey) || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      setFavoriteIds(JSON.parse(localStorage.getItem(favKey) || "[]"));
+    } catch {
+      setFavoriteIds([]);
+    }
+  }, [favKey]);
+
+  const toggleFavorite = (id: number) => {
+    setFavoriteIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      localStorage.setItem(favKey, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Detalle, Reseñas (social-service) y Checkout
   const [detailExp, setDetailExp] = useState<ActividadItem | null>(null);
+  const [reviewsData, setReviewsData] = useState<{
+    average_rating: number;
+    total_reviews: number;
+    reviews: any[];
+  }>({ average_rating: 0, total_reviews: 0, reviews: [] });
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewEcoVerified, setReviewEcoVerified] = useState(true);
+  const [reviewPhotos, setReviewPhotos] = useState<FileList | null>(null);
+  const [reviewMsg, setReviewMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
   const [checkoutExp, setCheckoutExp] = useState<ActividadItem | null>(null);
   const [bookingDate, setBookingDate] = useState(() => {
     const d = new Date();
@@ -63,31 +103,6 @@ export default function App() {
   const [biData, setBiData] = useState<any>(null);
   const [biError, setBiError] = useState("");
 
-  // Auditorías (Admin)
-  const [pendingAudits, setPendingAudits] = useState<any[]>([]);
-  const [auditNotes, setAuditNotes] = useState("Documentación ambiental verificada.");
-
-  // Negocio / Proveedor
-  const [docBusiness, setDocBusiness] = useState("Chinampas Vivas SC");
-  const [docCategory, setDocCategory] = useState("Naturaleza");
-  const [docDesc, setDocDesc] = useState("");
-  const [docFile, setDocFile] = useState<File | null>(null);
-  const [docMsg, setDocMsg] = useState("");
-
-  const [newExp, setNewExp] = useState({
-    title: "",
-    description: "",
-    category: "Naturaleza",
-    borough_cdmx: "Xochimilco",
-    price: 650,
-    duration_minutes: 180,
-    max_capacity: 8,
-    pet_friendly: true,
-    accessible: true,
-    sustainable_practices: "Cero plásticos de un solo uso y conservación de ecosistemas locales.",
-  });
-  const [expMsg, setExpMsg] = useState("");
-
   const loadCatalog = async () => {
     try {
       const list = await apiFetch<ActividadItem[]>("/api/catalog/experiences/");
@@ -97,9 +112,31 @@ export default function App() {
     }
   };
 
+  const loadReviews = async (experienceId: number) => {
+    try {
+      const data = await apiFetch<any>(`/api/social/reviews/experience/${experienceId}`);
+      setReviewsData({
+        average_rating: data.average_rating || 0,
+        total_reviews: data.total_reviews || 0,
+        reviews: Array.isArray(data.reviews) ? data.reviews : [],
+      });
+    } catch {
+      setReviewsData({ average_rating: 0, total_reviews: 0, reviews: [] });
+    }
+  };
+
   useEffect(() => {
     loadCatalog();
   }, []);
+
+  useEffect(() => {
+    if (detailExp) {
+      setReviewMsg(null);
+      setReviewComment("");
+      setReviewPhotos(null);
+      loadReviews(detailExp.id);
+    }
+  }, [detailExp]);
 
   useEffect(() => {
     if (view === "reservas" && session.token) {
@@ -113,12 +150,39 @@ export default function App() {
         .then(setBiData)
         .catch((err) => setBiError(err.message));
     }
-    if (view === "admin-auditorias") {
-      apiFetch<any[]>("/api/catalog/audits/pending")
-        .then(setPendingAudits)
-        .catch(() => setPendingAudits([]));
-    }
   }, [view, session.token]);
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailExp) return;
+    setReviewSubmitting(true);
+    setReviewMsg(null);
+
+    try {
+      const fd = new FormData();
+      fd.append("experienceId", String(detailExp.id));
+      fd.append("rating", String(reviewRating));
+      fd.append("comment", reviewComment.trim());
+      fd.append("ecologicalComplianceVerified", String(reviewEcoVerified));
+      if (reviewPhotos && reviewPhotos.length > 0) {
+        Array.from(reviewPhotos).slice(0, 5).forEach((file) => fd.append("photos", file));
+      }
+
+      await apiFetch("/api/social/reviews/", {
+        method: "POST",
+        body: fd,
+      });
+
+      setReviewMsg({ type: "ok", text: "¡Reseña verificada publicada en MongoDB / RustFS!" });
+      setReviewComment("");
+      setReviewPhotos(null);
+      await loadReviews(detailExp.id);
+    } catch (err: any) {
+      setReviewMsg({ type: "err", text: err.message });
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
 
   const handleOpenCheckout = (actividad: ActividadItem) => {
     if (!session.token) {
@@ -187,61 +251,10 @@ export default function App() {
     }
   };
 
-  const handleAuditDecision = async (auditId: number, decision: "APPROVED" | "REJECTED") => {
-    try {
-      await apiFetch(`/api/catalog/audits/${auditId}/decision`, {
-        method: "PATCH",
-        body: JSON.stringify({ decision, reviewer_notes: auditNotes }),
-      });
-      setPendingAudits((prev) => prev.filter((a) => a.id !== auditId));
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
-  const handleUploadEvidence = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setDocMsg("");
-    try {
-      const fd = new FormData();
-      fd.append("business_name", docBusiness);
-      fd.append("category", docCategory);
-      fd.append("description", docDesc || "Evidencia de prácticas regenerativas y manejo de residuos.");
-      const fileToSend =
-        docFile || new File(["%PDF-1.4 evidencia"], "Certificacion_Ambiental.pdf", { type: "application/pdf" });
-      fd.append("files", fileToSend);
-
-      const res = await apiFetch<any>("/api/catalog/audits/submit", {
-        method: "POST",
-        body: fd,
-      });
-      setDocMsg(`Evidencia enviada correctamente (Auditoría ID #${res.audit_id}).`);
-    } catch (err: any) {
-      setDocMsg(`Error: ${err.message}`);
-    }
-  };
-
-  const handleCreateExperience = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setExpMsg("");
-    try {
-      await apiFetch("/api/catalog/experiences/", {
-        method: "POST",
-        body: JSON.stringify({
-          ...newExp,
-          latitude: 19.2647,
-          longitude: -99.1036,
-          price: Number(newExp.price),
-          duration_minutes: Number(newExp.duration_minutes),
-          max_capacity: Number(newExp.max_capacity),
-        }),
-      });
-      setExpMsg("Experiencia publicada exitosamente en el catálogo CDMX.");
-      setNewExp({ ...newExp, title: "", description: "" });
-      loadCatalog();
-    } catch (err: any) {
-      setExpMsg(`Error: ${err.message}`);
-    }
+  const handleLogout = () => {
+    clearUserSession();
+    setSession(getUserSession());
+    setView("home");
   };
 
   const filteredExperiences = experiences.filter((e) => {
@@ -257,6 +270,8 @@ export default function App() {
     return matchesSearch && matchesCategory && matchesPet && matchesAccess;
   });
 
+  const isTourist = session.role?.toUpperCase() === "TOURIST";
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground transition-colors duration-300">
       <Header
@@ -266,11 +281,7 @@ export default function App() {
           setView(next);
         }}
         session={session}
-        onLogout={() => {
-          clearUserSession();
-          setSession(getUserSession());
-          setView("home");
-        }}
+        onLogout={handleLogout}
         lang={lang}
         onToggleLang={() => setLang(lang === "es" ? "en" : "es")}
       />
@@ -290,7 +301,6 @@ export default function App() {
             </h1>
           </div>
 
-          {/* Barra de Filtros */}
           <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-4 sm:p-5 shadow-sm mb-8 flex flex-col md:flex-row gap-4 items-center justify-between">
             <input
               type="text"
@@ -349,6 +359,8 @@ export default function App() {
                 <TarjetaActividad
                   key={exp.id}
                   actividad={exp}
+                  isFavorite={favoriteIds.includes(exp.id)}
+                  onToggleFavorite={toggleFavorite}
                   onReservar={handleOpenCheckout}
                   onVerDetalle={setDetailExp}
                 />
@@ -358,7 +370,7 @@ export default function App() {
         </main>
       )}
 
-      {/* VISTA 3: AUTH (LOGIN / REGISTER) */}
+      {/* VISTA 3: AUTH */}
       {view === "auth" && (
         <AuthViews
           initialError={authNotice}
@@ -369,7 +381,21 @@ export default function App() {
         />
       )}
 
-      {/* VISTA 4: MIS RESERVAS */}
+      {/* VISTA 4: PERFIL Y FAVORITOS */}
+      {view === "perfil" && (
+        <PerfilPortal
+          session={session}
+          experiences={experiences}
+          favoriteIds={favoriteIds}
+          onToggleFavorite={toggleFavorite}
+          onReservar={handleOpenCheckout}
+          onVerDetalle={setDetailExp}
+          onNavigate={setView}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {/* VISTA 5: MIS RESERVAS */}
       {view === "reservas" && (
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-10">
           <h1 className="font-serif text-3xl mb-6">Mis Reservaciones Ecológicas</h1>
@@ -413,7 +439,7 @@ export default function App() {
         </main>
       )}
 
-      {/* VISTA 5: GUÍA IA */}
+      {/* VISTA 6: GUÍA IA */}
       {view === "ia" && (
         <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-10">
           <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 shadow-sm">
@@ -451,19 +477,10 @@ export default function App() {
         </main>
       )}
 
-      {/* VISTA 6: ADMIN - AUDITORÍAS */}
+      {/* VISTA 7: ADMIN - AUDITORÍAS */}
       {view === "admin-auditorias" && <AdminAuditsPortal />}
 
-{(view === "negocio-documentos" || view === "negocio-dashboard") && (
-  <ProviderPortal
-    session={session}
-    initialTab={view === "negocio-documentos" ? "evidencias" : "cuenta"}
-    onCatalogUpdated={loadCatalog}
-    onNavigateReservas={() => setView("reservas")}
-  />
-)}
-
-      {/* VISTA 7: ADMIN - PANEL BI */}
+      {/* VISTA 8: ADMIN - PANEL BI */}
       {view === "admin-bi" && (
         <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-10">
           <h1 className="font-serif text-3xl mb-2">Panel BI e Impacto Ambiental</h1>
@@ -506,6 +523,16 @@ export default function App() {
         </main>
       )}
 
+      {/* VISTA 9: PROVEEDOR - PORTAL COMPLETO */}
+      {(view === "negocio-documentos" || view === "negocio-dashboard") && (
+        <ProviderPortal
+          session={session}
+          initialTab={view === "negocio-documentos" ? "evidencias" : "cuenta"}
+          onCatalogUpdated={loadCatalog}
+          onNavigateReservas={() => setView("reservas")}
+        />
+      )}
+
       {/* VISTA 10: ACERCA DE NOSOTROS */}
       {view === "about" && (
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
@@ -523,23 +550,34 @@ export default function App() {
         </main>
       )}
 
-      {/* MODAL DETALLE DE ACTIVIDAD */}
+      {/* MODAL DETALLE DE ACTIVIDAD + RESEÑAS VERIFICADAS (SOCIAL-SERVICE) */}
       {detailExp && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-lg w-full p-6 sm:p-8 shadow-xl relative">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-[#2A312C] rounded-[2rem] max-w-2xl w-full p-6 sm:p-8 shadow-xl relative my-8 max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setDetailExp(null)}
               className="absolute top-5 right-5 w-9 h-9 rounded-full bg-[#F2EFE9] dark:bg-[#18201C] flex items-center justify-center"
             >
               <X className="w-4 h-4" />
             </button>
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#728C69] uppercase mb-2">
-              <ShieldCheck className="w-4 h-4" /> Experiencia Verificada
-            </span>
+
+            <div className="flex items-center gap-3 mb-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#728C69] uppercase">
+                <ShieldCheck className="w-4 h-4" /> Experiencia Verificada
+              </span>
+              {reviewsData.total_reviews > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-0.5 rounded-full">
+                  <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                  {reviewsData.average_rating} ({reviewsData.total_reviews})
+                </span>
+              )}
+            </div>
+
             <h2 className="font-serif text-2xl sm:text-3xl mb-3">{detailExp.title}</h2>
             <p className="text-sm text-muted-foreground mb-5">
               {detailExp.sustainable_practices}
             </p>
+
             <div className="grid grid-cols-3 gap-3 bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl text-xs mb-6">
               <div className="flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-[#728C69]" /> {detailExp.borough_cdmx}
@@ -551,7 +589,8 @@ export default function App() {
                 <Users className="w-4 h-4 text-[#728C69]" /> Máx {detailExp.max_capacity}
               </div>
             </div>
-            <div className="flex items-center justify-between">
+
+            <div className="flex items-center justify-between pb-6 border-b border-border">
               <div>
                 <span className="text-xs text-muted-foreground block">Tarifa por persona</span>
                 <span className="text-xl font-bold">${detailExp.price} MXN</span>
@@ -566,6 +605,131 @@ export default function App() {
               >
                 Reservar ahora
               </button>
+            </div>
+
+            {/* SECCIÓN DE RESEÑAS VERIFICADAS CONTRA GREENWASHING */}
+            <div className="mt-6 space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-serif text-xl">
+                  Reseñas y Evidencias Reales ({reviewsData.total_reviews})
+                </h3>
+              </div>
+
+              {session.token && isTourist && (
+                <form
+                  onSubmit={handleSubmitReview}
+                  className="bg-[#F2EFE9] dark:bg-[#18201C] p-4 rounded-2xl space-y-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold">Comparte tu experiencia verificada</span>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setReviewRating(star)}
+                          className="p-0.5"
+                        >
+                          <Star
+                            className={`w-4 h-4 ${
+                              star <= reviewRating
+                                ? "fill-amber-500 text-amber-500"
+                                : "text-gray-400"
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <textarea
+                    required
+                    rows={2}
+                    placeholder="¿Cómo fue la experiencia y el cuidado ambiental del lugar?"
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                    className="w-full bg-white dark:bg-[#2A312C] rounded-xl p-3 text-xs"
+                  />
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={reviewEcoVerified}
+                        onChange={(e) => setReviewEcoVerified(e.target.checked)}
+                      />
+                      <span>Confirmo cumplimiento ecológico real</span>
+                    </label>
+
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer text-[#728C69] font-medium">
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>
+                        {reviewPhotos?.length
+                          ? `${reviewPhotos.length} foto(s) lista(s)`
+                          : "Adjuntar fotos"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(e) => setReviewPhotos(e.target.files)}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {reviewMsg && (
+                    <p
+                      className={`text-xs ${
+                        reviewMsg.type === "ok" ? "text-green-700" : "text-red-600"
+                      }`}
+                    >
+                      {reviewMsg.text}
+                    </p>
+                  )}
+
+                  <button
+                    disabled={reviewSubmitting}
+                    type="submit"
+                    className="bg-[#728C69] hover:bg-[#5B7153] text-white text-xs font-semibold px-4 py-2 rounded-xl"
+                  >
+                    {reviewSubmitting ? "Publicando..." : "Publicar reseña"}
+                  </button>
+                </form>
+              )}
+
+              {reviewsData.reviews.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Aún no hay reseñas para esta experiencia. ¡Sé el primero en compartir tu visita!
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {reviewsData.reviews.map((rev: any) => (
+                    <div
+                      key={rev._id}
+                      className="p-4 rounded-2xl bg-[#F2EFE9]/70 dark:bg-[#18201C]/70 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold">Turista #{rev.touristId}</span>
+                          {rev.ecologicalComplianceVerified && (
+                            <span className="text-[10px] bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-semibold">
+                              Cumplimiento ecológico verificado
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-bold text-amber-600">★ {rev.rating}/5</span>
+                      </div>
+                      <p className="text-xs text-foreground">{rev.comment}</p>
+                      {Array.isArray(rev.photoKeys) && rev.photoKeys.length > 0 && (
+                        <p className="text-[10px] text-[#728C69] font-medium">
+                          {rev.photoKeys.length} fotografía(s) probatoria(s) en RustFS/S3
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

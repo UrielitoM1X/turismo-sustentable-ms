@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 
 export interface ActividadItem {
   id: number;
@@ -15,17 +15,19 @@ export interface ActividadItem {
 
 interface TarjetaActividadProps {
   actividad: ActividadItem;
+  isFavorite: boolean;
+  onToggleFavorite: (id: number) => void;
   onReservar: (actividad: ActividadItem) => void;
   onVerDetalle: (actividad: ActividadItem) => void;
 }
 
 export default function TarjetaActividad({
   actividad,
+  isFavorite,
+  onToggleFavorite,
   onReservar,
   onVerDetalle,
 }: TarjetaActividadProps) {
-  const [isFavorite, setIsFavorite] = useState(false);
-
   const formattedPrecio = `$${Number(actividad.price).toLocaleString("es-MX")}`;
 
   return (
@@ -48,10 +50,10 @@ export default function TarjetaActividad({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            setIsFavorite(!isFavorite);
+            onToggleFavorite(actividad.id);
           }}
-          aria-label="Guardar en favoritos"
-          className="absolute top-4 right-4 z-20 w-9 h-9 bg-white/40 dark:bg-black/30 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-white/60 transition-all hover:scale-110"
+          aria-label={isFavorite ? "Quitar de favoritos" : "Guardar en favoritos"}
+          className="absolute top-4 right-4 z-20 w-9 h-9 bg-white/40 dark:bg-black/30 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-white/60 transition-all hover:scale-110 active:scale-95"
         >
           <svg
             width="20"
@@ -101,7 +103,9 @@ export default function TarjetaActividad({
           </div>
 
           <p className="text-sm text-[#63665E] dark:text-[#9EA399] mb-2 flex items-center gap-1.5">
-            <span>{actividad.borough_cdmx}, CDMX · Cupo máx: {actividad.max_capacity}</span>
+            <span>
+              {actividad.borough_cdmx}, CDMX · Cupo máx: {actividad.max_capacity}
+            </span>
           </p>
           <p className="text-xs text-[#8C9287] line-clamp-2 mb-4">
             {actividad.sustainable_practices}

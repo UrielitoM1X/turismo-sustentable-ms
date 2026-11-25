@@ -222,6 +222,27 @@ def run_end_to_end_verification() -> None:
         assert bi_res.status_code == 200, f"Fallo consulta BI: {bi_res.text}"
         print(f"[OK] 7. [ADMIN] Panel BI actualizado via RabbitMQ: {bi_res.json()['kpis']}")
 
+# =========================================================
+        # 8. ROL TURISTA: RESENA VERIFICADA Y EVIDENCIA EN SOCIAL-SERVICE
+        # =========================================================
+        review_res = client.post(
+            "/api/social/reviews/",
+            headers={"Authorization": f"Bearer {tour_token}"},
+            data={
+                "experienceId": str(exp_id),
+                "rating": "5",
+                "comment": "Recorrido autentico sin plasticos y con respeto total a la chinampa.",
+                "ecologicalComplianceVerified": "true",
+            },
+            files=[("photos", ("evidencia_turista.jpg", b"\xff\xd8\xff\xe0 foto", "image/jpeg"))],
+        )
+        assert review_res.status_code == 201, f"Fallo publicacion de resena: {review_res.text}"
 
+        get_reviews_res = client.get(f"/api/social/reviews/experience/{exp_id}")
+        assert get_reviews_res.status_code == 200
+        rev_data = get_reviews_res.json()
+        assert rev_data["total_reviews"] >= 1 and rev_data["average_rating"] == 5.0
+        print(f"[OK] 8. [SOCIAL] Resena con foto subida a RustFS y promedio verificado: {rev_data['average_rating']}/5.")
+        
 if __name__ == "__main__":
     run_end_to_end_verification()
