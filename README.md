@@ -1,3 +1,8 @@
-Al agregar el servicio frontend al docker compose asignar
-red frontend_net y agregar a depends_on del gateway al tener
-el package.json
+### Requisitos
+- Docker
+- WSL
+
+### Ejecucion
+1. Para ejecutar solo usar el comando: 'docker compose up -d --build'
+2. Para detener el contenedor (cuando se termine de usar): 'docker compose down'
+3. Para borrarlos completamente: 'docker compose down -v'
