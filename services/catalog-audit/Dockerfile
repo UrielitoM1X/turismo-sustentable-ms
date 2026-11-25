@@ -23,5 +23,5 @@ COPY ./src ./src
 # Exponer puerto interno del servicio
 EXPOSE 8000
 
-# Iniciar servidor ASGI con recarga automatica para desarrollo
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Iniciar servidor ASGI para produccion
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

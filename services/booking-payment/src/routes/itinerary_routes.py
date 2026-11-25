@@ -5,11 +5,23 @@ from src.utils.auth_guard import verify_jwt_token
 from src.schemas.booking_schema import ItineraryCreateRequest, ItineraryItemAddRequest
 from src.controllers.itinerary_controller import (
     toggle_favorite,
+    list_favorites,
     create_itinerary,
     add_item_to_itinerary
 )
 
 router = APIRouter(prefix="/planning", tags=["Favorites & Itineraries"])
+
+
+@router.get("/favorites")
+def get_favorites(
+    payload: dict = Depends(verify_jwt_token),
+    db: Session = Depends(get_db)
+):
+    # Listar experiencias favoritas del turista autenticado
+    if payload.get("role") != "TOURIST":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso exclusivo para turistas")
+    return list_favorites(db, int(payload["sub"]))
 
 
 @router.post("/favorites/{experience_id}")

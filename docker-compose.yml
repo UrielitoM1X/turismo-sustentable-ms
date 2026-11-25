@@ -73,6 +73,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
       - STRIPE_API_KEY=${STRIPE_API_KEY}
+      - CATALOG_SERVICE_URL=http://catalog-service:8000
     depends_on:
       db-core:
         condition: service_healthy
@@ -97,9 +98,13 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_USER}
       - MINIO_SECRET_KEY=${MINIO_PASS}
       - RABBITMQ_URL=amqp://${MQ_USER}:${MQ_PASS}@rabbitmq:5672
+      - BOOKING_SERVICE_URL=http://booking-service:8000
+      - NODE_ENV=production
     depends_on:
-      - db-social
-      - rabbitmq
+      db-social:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - backend_net
     restart: unless-stopped
@@ -113,6 +118,8 @@ services:
     environment:
       - LLM_API_KEY=${LLM_API_KEY}
       - CATALOG_SERVICE_URL=http://catalog-service:8000
+    depends_on:
+      - catalog-service
     networks:
       - backend_net
     restart: unless-stopped
@@ -156,7 +163,7 @@ services:
       - pg_data:/var/lib/postgresql/data
       - ./infra/init-dbs.sql:/docker-entrypoint-initdb.d/init-dbs.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d db_catalog"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -170,6 +177,11 @@ services:
     container_name: ts_mongodb
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - backend_net
     restart: unless-stopped

@@ -6,6 +6,7 @@ from src.schemas.booking_schema import BookingCreateRequest, PaymentConfirmReque
 from src.controllers.booking_controller import (
     create_pre_booking,
     process_booking_payment,
+    cancel_booking,
     list_tourist_bookings
 )
 
@@ -36,10 +37,24 @@ def pay_reservation(
     return process_booking_payment(db, int(payload["sub"]), payment_data)
 
 
+@router.post("/{booking_id}/cancel")
+def cancel_reservation(
+    booking_id: int,
+    payload: dict = Depends(verify_jwt_token),
+    db: Session = Depends(get_db)
+):
+    # Cancelar reserva pendiente de pago y liberar cupo ecologico
+    if payload.get("role") != "TOURIST":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo turistas pueden cancelar reservas")
+    return cancel_booking(db, int(payload["sub"]), booking_id)
+
+
 @router.get("/my-bookings")
 def get_my_bookings(
     payload: dict = Depends(verify_jwt_token),
     db: Session = Depends(get_db)
 ):
     # Listar reservas activas e historial del turista
+    if payload.get("role") != "TOURIST":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo turistas pueden consultar sus reservas")
     return list_tourist_bookings(db, int(payload["sub"]))

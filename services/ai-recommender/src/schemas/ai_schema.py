@@ -4,7 +4,7 @@ from typing import Optional
 
 class RecommendationRequest(BaseModel):
     # Validar intereses, accesibilidad y mascotas del turista
-    travel_interests: list[str] = Field(default_factory=list)
+    travel_interests: list[str] = Field(default_factory=list, max_length=20)
     preferred_borough: Optional[str] = None
     requires_accessibility: bool = False
     with_pets: bool = False
@@ -14,4 +14,4 @@ class RecommendationRequest(BaseModel):
 class ChatAssistantRequest(BaseModel):
     # Validar consulta conversacional enviada desde la burbuja de IA
     message: str = Field(min_length=2, max_length=600)
-    travel_interests: list[str] = Field(default_factory=list)
+    travel_interests: list[str] = Field(default_factory=list, max_length=20)

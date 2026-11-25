@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from src.models.booking_model import FavoriteExperience, Itinerary, ItineraryItem
 from src.schemas.booking_schema import ItineraryCreateRequest, ItineraryItemAddRequest
@@ -16,9 +17,21 @@ def toggle_favorite(db: Session, tourist_id: int, experience_id: int) -> dict:
         db.commit()
         return {"experience_id": experience_id, "is_favorite": False}
 
-    db.add(FavoriteExperience(tourist_id=tourist_id, experience_id=experience_id))
-    db.commit()
-    return {"experience_id": experience_id, "is_favorite": True}
+    try:
+        db.add(FavoriteExperience(tourist_id=tourist_id, experience_id=experience_id))
+        db.commit()
+        return {"experience_id": experience_id, "is_favorite": True}
+    except IntegrityError:
+        db.rollback()
+        return {"experience_id": experience_id, "is_favorite": True}
+
+
+def list_favorites(db: Session, tourist_id: int) -> dict:
+    # Listar identificadores de experiencias favoritas del turista
+    rows = db.query(FavoriteExperience.experience_id).filter(
+        FavoriteExperience.tourist_id == tourist_id
+    ).order_by(FavoriteExperience.saved_at.desc()).all()
+    return {"favorite_experience_ids": [row[0] for row in rows]}
 
 
 def create_itinerary(db: Session, tourist_id: int, data: ItineraryCreateRequest) -> dict:

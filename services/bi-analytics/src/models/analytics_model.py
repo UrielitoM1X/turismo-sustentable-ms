@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Numeric, DateTime
 from sqlalchemy.sql import func
 from src.config.database import Base
 
@@ -14,6 +14,6 @@ class BookingMetricRecord(Base):
     provider_id = Column(Integer, index=True, default=0)
     category = Column(String(50), index=True, default="General")
     guests_count = Column(Integer, nullable=False)
-    total_amount = Column(Float, nullable=False)
-    impact_contribution = Column(Float, nullable=False)
+    total_amount = Column(Numeric(10, 2, asdecimal=False), nullable=False)
+    impact_contribution = Column(Numeric(10, 2, asdecimal=False), nullable=False)
     recorded_at = Column(DateTime(timezone=True), server_default=func.now())
