@@ -13,8 +13,10 @@ import {
   MapPin,
   User,
   Paperclip,
+  ExternalLink,
+  RefreshCw,
 } from "lucide-react";
-import { apiFetch } from "../api/client";
+import { apiFetch, getUserSession } from "../api/client";
 
 const ALCALDIAS_CDMX = [
   "Alvaro Obregon",
@@ -43,7 +45,7 @@ const CATEGORIAS_CATALOGO = [
 ];
 
 // ============================================================================
-// 1. PANEL DE PROVEEDOR (MI CUENTA + CREAR ACTIVIDAD CON EVIDENCIAS + ESTADO)
+// 1. PANEL DE PROVEEDOR (MI CUENTA + CREAR ACTIVIDAD + ESTADO REAL EN BD)
 // ============================================================================
 interface ProviderPortalProps {
   session: { token: string | null; role: string | null; name: string | null };
@@ -65,15 +67,8 @@ export function ProviderPortal({
     null
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const storageKey = `ts_provider_audits_${session.name || "default"}`;
-  const [submittedAudits, setSubmittedAudits] = useState<any[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(storageKey) || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [loadingAudits, setLoadingAudits] = useState(false);
+  const [myAudits, setMyAudits] = useState<any[]>([]);
 
   // Formulario unificado: Datos de Actividad + Evidencias Ambientales
   const [businessName, setBusinessName] = useState(session.name || "Cooperativa Sustentable CDMX");
@@ -91,28 +86,33 @@ export function ProviderPortal({
   const [accessible, setAccessible] = useState(true);
   const [evidenceFiles, setEvidenceFiles] = useState<FileList | null>(null);
 
+  const loadMyAudits = async () => {
+    setLoadingAudits(true);
+    try {
+      const list = await apiFetch<any[]>("/api/catalog/audits/my-audits");
+      setMyAudits(Array.isArray(list) ? list : []);
+    } catch {
+      setMyAudits([]);
+    } finally {
+      setLoadingAudits(false);
+    }
+  };
+
   useEffect(() => {
     if (initialTab === "cuenta") setActiveTab("cuenta");
     else if (initialTab === "resumen") setActiveTab("solicitudes");
     else setActiveTab("nuevaExp");
   }, [initialTab]);
 
-  // Sincronizar estado real de las auditorías con el backend
   useEffect(() => {
-    apiFetch<any[]>("/api/catalog/audits/pending")
-      .then((pendingList) => {
-        const pendingIds = new Set(pendingList.map((a) => a.id));
-        setSubmittedAudits((prev) => {
-          const updated = prev.map((item) => ({
-            ...item,
-            status: pendingIds.has(item.id) ? "PENDING" : "APPROVED",
-          }));
-          localStorage.setItem(storageKey, JSON.stringify(updated));
-          return updated;
-        });
-      })
-      .catch(() => {});
-  }, [storageKey]);
+    loadMyAudits();
+  }, [session.token]);
+
+  useEffect(() => {
+    if (activeTab === "solicitudes") {
+      loadMyAudits();
+    }
+  }, [activeTab]);
 
   const handleCrearActividadConEvidencia = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,7 +140,7 @@ export function ProviderPortal({
       });
 
       // 2. Registrar la actividad en PostGIS como INACTIVA (is_active=False) hasta aprobación del Admin
-      const expRes = await apiFetch<any>("/api/catalog/experiences/", {
+      await apiFetch<any>("/api/catalog/experiences/", {
         method: "POST",
         body: JSON.stringify({
           title: expTitulo.trim(),
@@ -158,23 +158,6 @@ export function ProviderPortal({
         }),
       });
 
-      const newRecord = {
-        id: auditRes.audit_id,
-        experience_id: expRes.id,
-        title: expTitulo.trim(),
-        business_name: businessName.trim(),
-        category: expCategoria,
-        borough_cdmx: expAlcaldia,
-        files_count: evidenceFiles.length,
-        status: "PENDING",
-      };
-
-      setSubmittedAudits((prev) => {
-        const next = [newRecord, ...prev];
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        return next;
-      });
-
       setFeedback({
         type: "success",
         text: `¡Actividad "${expTitulo.trim()}" y ${evidenceFiles.length} evidencia(s) enviadas! Quedó registrada en Auditoría #${auditRes.audit_id} y aparecerá en el catálogo público en cuanto un Administrador la apruebe.`,
@@ -182,6 +165,7 @@ export function ProviderPortal({
       setExpTitulo("");
       setExpDesc("");
       setEvidenceFiles(null);
+      await loadMyAudits();
       setActiveTab("solicitudes");
       onCatalogUpdated();
     } catch (err: any) {
@@ -198,7 +182,7 @@ export function ProviderPortal({
           {[
             { id: "cuenta", label: "Mi Cuenta" },
             { id: "nuevaExp", label: "+ Nueva Actividad y Evidencias" },
-            { id: "solicitudes", label: `Mis Solicitudes (${submittedAudits.length})` },
+            { id: "solicitudes", label: `Mis Solicitudes (${myAudits.length})` },
           ].map((t) => (
             <button
               key={t.id}
@@ -445,7 +429,6 @@ export function ProviderPortal({
                 />
               </div>
 
-              {/* SECCIÓN INTEGRADA DE EVIDENCIAS AMBIENTALES */}
               <div className="p-4 rounded-2xl bg-[#F4F1EA] dark:bg-[#1E2420] border border-dashed border-[#728C69]/50 space-y-2">
                 <label className="text-xs font-bold flex items-center gap-1.5 text-[#3B523E] dark:text-[#A5B29A]">
                   <Paperclip className="w-4 h-4 text-[#728C69]" />
@@ -480,17 +463,30 @@ export function ProviderPortal({
         {/* SUBVISTA C: MIS SOLICITUDES EN AUDITORÍA */}
         {activeTab === "solicitudes" && (
           <div className="space-y-4">
-            <div className="rounded-2xl p-5 mb-6 border bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-300 flex items-start gap-3.5">
-              <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-sm font-bold">Validación contra Greenwashing</h3>
-                <p className="text-xs mt-1 leading-relaxed">
-                  Cada actividad enviada permanece oculta hasta que un Administrador aprueba las evidencias adjuntas. Una vez aprobada, se publica automáticamente en el catálogo.
-                </p>
+            <div className="rounded-2xl p-5 mb-6 border bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-300 flex items-start justify-between gap-3.5">
+              <div className="flex items-start gap-3.5">
+                <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold">Validación contra Greenwashing</h3>
+                  <p className="text-xs mt-1 leading-relaxed">
+                    Consulta aquí el dictamen oficial de tus actividades enviadas. Cuando un Administrador apruebe tu expediente, tu experiencia aparecerá automáticamente en el catálogo público.
+                  </p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={loadMyAudits}
+                disabled={loadingAudits}
+                className="shrink-0 inline-flex items-center gap-1.5 bg-white dark:bg-[#2A312C] text-[#1E201D] dark:text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-sm hover:bg-[#E3E5D8]"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingAudits ? "animate-spin" : ""}`} />
+                Actualizar
+              </button>
             </div>
 
-            {submittedAudits.length === 0 ? (
+            {loadingAudits ? (
+              <p className="text-sm text-muted-foreground">Consultando estado de auditorías...</p>
+            ) : myAudits.length === 0 ? (
               <div className="p-8 text-center bg-white dark:bg-[#2A312C] rounded-2xl border border-dashed border-[#8C9287]/40">
                 <UploadCloud className="h-10 w-10 text-[#728C69] mx-auto mb-2" />
                 <p className="text-sm text-[#8C9287] mb-3">
@@ -505,33 +501,57 @@ export function ProviderPortal({
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
-                {submittedAudits.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="bg-white dark:bg-[#2A312C] rounded-2xl p-5 shadow-sm"
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-bold text-[#728C69] uppercase tracking-wider">
-                        Auditoría #{doc.id} · {doc.category}
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                          doc.status === "PENDING"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-emerald-100 text-emerald-800"
-                        }`}
-                      >
-                        {doc.status === "PENDING"
-                          ? "PENDIENTE DE VALIDACIÓN"
-                          : "APROBADA Y PUBLICADA"}
-                      </span>
+                {myAudits.map((doc) => {
+                  const statusUpper = String(doc.status || "PENDING").toUpperCase();
+                  const isApproved = statusUpper === "APPROVED";
+                  const isRejected = statusUpper === "REJECTED";
+
+                  return (
+                    <div
+                      key={doc.id}
+                      className="bg-white dark:bg-[#2A312C] rounded-2xl p-5 shadow-sm space-y-2.5"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="text-[10px] font-bold text-[#728C69] uppercase tracking-wider">
+                          Auditoría #{doc.id} · {doc.category}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                            isApproved
+                              ? "bg-emerald-100 text-emerald-800"
+                              : isRejected
+                              ? "bg-rose-100 text-rose-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {isApproved
+                            ? "APROBADA Y PUBLICADA"
+                            : isRejected
+                            ? "RECHAZADA"
+                            : "PENDIENTE DE VALIDACIÓN"}
+                        </span>
+                      </div>
+                      <h3 className="font-semibold text-sm">{doc.business_name}</h3>
+                      <p className="text-xs text-[#63665E] dark:text-[#A5B29A] line-clamp-2">
+                        {doc.description}
+                      </p>
+                      <p className="text-[11px] text-[#8C9287]">
+                        {doc.files_count || 1} evidencia(s) adjunta(s) en RustFS/S3
+                      </p>
+                      {doc.reviewer_notes && (
+                        <div
+                          className={`p-3 rounded-xl text-xs ${
+                            isRejected
+                              ? "bg-rose-50 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300"
+                              : "bg-[#F4F1EA] dark:bg-[#18201C] text-[#3B523E] dark:text-[#A5B29A]"
+                          }`}
+                        >
+                          <strong>Dictamen del Administrador:</strong> {doc.reviewer_notes}
+                        </div>
+                      )}
                     </div>
-                    <h3 className="font-semibold text-sm">{doc.title || doc.business_name}</h3>
-                    <p className="text-xs text-[#63665E] dark:text-[#A5B29A] mt-1">
-                      {doc.borough_cdmx} · {doc.files_count || 1} evidencia(s) en RustFS/S3
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -542,7 +562,7 @@ export function ProviderPortal({
 }
 
 // ============================================================================
-// 2. PANEL DE ADMINISTRADOR (AUDITORÍAS PENDIENTES -> APRUEBA Y PUBLICA)
+// 2. PANEL DE ADMINISTRADOR (AUDITORÍAS PENDIENTES -> ABRIR ARCHIVO + APROBAR)
 // ============================================================================
 interface AdminAuditsPortalProps {
   onCatalogUpdated?: () => void;
@@ -555,6 +575,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
   const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
   const [retroalimentacion, setRetroalimentacion] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [openingFileId, setOpeningFileId] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchAuditorias = async () => {
@@ -572,6 +593,26 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
   useEffect(() => {
     fetchAuditorias();
   }, []);
+
+  const handleOpenEvidenceFile = async (fileId: number) => {
+    setOpeningFileId(fileId);
+    try {
+      const { token } = getUserSession();
+      const res = await fetch(`/api/catalog/audits/files/${fileId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        throw new Error("No se pudo abrir el archivo de evidencia");
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+    } catch (err: any) {
+      setStatusMessage({ type: "error", text: err.message });
+    } finally {
+      setOpeningFileId(null);
+    }
+  };
 
   const handleDictamen = async (decision: "APPROVED" | "REJECTED") => {
     if (!selectedAudit) return;
@@ -693,7 +734,7 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                   selectedAudit.files.map((f: any) => (
                     <div
                       key={f.id}
-                      className="p-4 rounded-2xl bg-[#F4F1EA] dark:bg-[#18201C] border border-[#728C69]/20 flex items-center justify-between"
+                      className="p-4 rounded-2xl bg-[#F4F1EA] dark:bg-[#18201C] border border-[#728C69]/20 flex items-center justify-between gap-3"
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-[#728C69]/20 text-[#728C69] rounded-xl flex items-center justify-center">
@@ -706,9 +747,15 @@ export function AdminAuditsPortal({ onCatalogUpdated }: AdminAuditsPortalProps) 
                           </span>
                         </div>
                       </div>
-                      <span className="text-[10px] font-semibold bg-green-100 text-green-800 px-2.5 py-1 rounded-full">
-                        Verificable
-                      </span>
+                      <button
+                        type="button"
+                        disabled={openingFileId === f.id}
+                        onClick={() => handleOpenEvidenceFile(f.id)}
+                        className="inline-flex items-center gap-1.5 text-[11px] font-semibold bg-[#728C69] hover:bg-[#5B7153] text-white px-3.5 py-2 rounded-xl transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        {openingFileId === f.id ? "Abriendo..." : "Abrir archivo"}
+                      </button>
                     </div>
                   ))
                 ) : (

@@ -1,5 +1,6 @@
 import uuid
 from fastapi import HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from src.models.catalog_model import SustainabilityAudit, AuditEvidenceFile, Experience
 from src.schemas.catalog_schema import AuditDecisionRequest
@@ -54,6 +55,29 @@ async def submit_provider_evidence(
     return {"audit_id": audit.id, "status": "PENDING", "files_uploaded": len(files)}
 
 
+def list_provider_audits(db: Session, provider_id: int) -> list[dict]:
+    audits = (
+        db.query(SustainabilityAudit)
+        .filter(SustainabilityAudit.provider_id == provider_id)
+        .order_by(SustainabilityAudit.created_at.desc())
+        .all()
+    )
+    results = []
+    for a in audits:
+        files = db.query(AuditEvidenceFile).filter(AuditEvidenceFile.audit_id == a.id).all()
+        results.append({
+            "id": a.id,
+            "business_name": a.business_name,
+            "category": a.category,
+            "description": a.description,
+            "status": a.status,
+            "reviewer_notes": a.reviewer_notes,
+            "created_at": a.created_at,
+            "files_count": len(files),
+        })
+    return results
+
+
 def list_pending_audits(db: Session, category: str | None = None) -> list[dict]:
     query = db.query(SustainabilityAudit).filter(SustainabilityAudit.status == "PENDING")
     if category:
@@ -79,6 +103,26 @@ def list_pending_audits(db: Session, category: str | None = None) -> list[dict]:
     return results
 
 
+def get_evidence_file_response(db: Session, file_id: int) -> Response:
+    evidence = db.query(AuditEvidenceFile).filter(AuditEvidenceFile.id == file_id).first()
+    if not evidence:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archivo de evidencia no encontrado")
+
+    try:
+        s3_obj = s3_client.get_object(Bucket=settings.s3_bucket_name, Key=evidence.s3_object_key)
+        raw_bytes = s3_obj["Body"].read()
+        media_type = s3_obj.get("ContentType") or (
+            "application/pdf" if evidence.file_type == "PDF" else "image/jpeg"
+        )
+        return Response(
+            content=raw_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": f'inline; filename="{evidence.file_name}"'}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Error al leer S3: {exc}")
+
+
 def resolve_audit(db: Session, audit_id: int, admin_id: int, decision_data: AuditDecisionRequest) -> dict:
     audit = db.query(SustainabilityAudit).filter(SustainabilityAudit.id == audit_id).first()
     if not audit:
@@ -88,7 +132,6 @@ def resolve_audit(db: Session, audit_id: int, admin_id: int, decision_data: Audi
     audit.reviewer_notes = decision_data.reviewer_notes
     audit.reviewed_by = admin_id
 
-    # Si el Administrador aprueba la auditoria, activar las experiencias pendientes de este proveedor
     if decision_data.decision == "APPROVED":
         db.query(Experience).filter(
             Experience.provider_id == audit.provider_id,
