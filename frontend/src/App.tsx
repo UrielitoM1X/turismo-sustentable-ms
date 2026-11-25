@@ -20,6 +20,7 @@ import {
   getUserSession,
   clearUserSession,
 } from "./api/client";
+import { ProviderPortal, AdminAuditsPortal } from "./components/RoleDashboards";
 
 export default function App() {
   const [view, setView] = useState<RouteView>("home");
@@ -451,57 +452,16 @@ export default function App() {
       )}
 
       {/* VISTA 6: ADMIN - AUDITORÍAS */}
-      {view === "admin-auditorias" && (
-        <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-10">
-          <h1 className="font-serif text-3xl mb-2">Auditoría de Evidencias Ambientales</h1>
-          <p className="text-sm text-muted-foreground mb-6">
-            Valida los expedientes subidos a RustFS/MinIO antes de otorgar el sello sustentable.
-          </p>
+      {view === "admin-auditorias" && <AdminAuditsPortal />}
 
-          {pendingAudits.length === 0 ? (
-            <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 text-center text-sm text-muted-foreground">
-              No hay auditorías pendientes por revisar en este momento.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {pendingAudits.map((audit) => (
-                <div
-                  key={audit.id}
-                  className="bg-white dark:bg-[#2A312C] rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div>
-                    <span className="text-xs font-bold uppercase text-[#C81D77]">
-                      Auditoría #{audit.id} · {audit.category}
-                    </span>
-                    <h3 className="font-serif text-xl mt-1">{audit.business_name}</h3>
-                    <p className="text-xs text-muted-foreground mt-1">{audit.description}</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      value={auditNotes}
-                      onChange={(e) => setAuditNotes(e.target.value)}
-                      placeholder="Notas de revisión"
-                      className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-3 h-10 text-xs"
-                    />
-                    <button
-                      onClick={() => handleAuditDecision(audit.id, "APPROVED")}
-                      className="bg-[#728C69] hover:bg-[#5B7153] text-white text-xs font-medium px-4 h-10 rounded-xl"
-                    >
-                      Aprobar
-                    </button>
-                    <button
-                      onClick={() => handleAuditDecision(audit.id, "REJECTED")}
-                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-medium px-4 h-10 rounded-xl"
-                    >
-                      Rechazar
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </main>
-      )}
+{(view === "negocio-documentos" || view === "negocio-dashboard") && (
+  <ProviderPortal
+    session={session}
+    initialTab={view === "negocio-documentos" ? "evidencias" : "cuenta"}
+    onCatalogUpdated={loadCatalog}
+    onNavigateReservas={() => setView("reservas")}
+  />
+)}
 
       {/* VISTA 7: ADMIN - PANEL BI */}
       {view === "admin-bi" && (
@@ -543,144 +503,6 @@ export default function App() {
           ) : (
             <p className="text-sm text-muted-foreground">Cargando métricas analíticas...</p>
           )}
-        </main>
-      )}
-
-      {/* VISTA 8: PROVEEDOR - SUBIR EVIDENCIAS */}
-      {view === "negocio-documentos" && (
-        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-10">
-          <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 shadow-sm">
-            <div className="w-12 h-12 rounded-2xl bg-[#728C69]/15 text-[#728C69] flex items-center justify-center mb-4">
-              <UploadCloud className="w-6 h-6" />
-            </div>
-            <h1 className="font-serif text-3xl mb-2">Subir Evidencias Ambientales</h1>
-            <p className="text-sm text-muted-foreground mb-6">
-              Los archivos se almacenan en RustFS/MinIO para validación por el equipo auditor.
-            </p>
-
-            {docMsg && (
-              <div className="p-3 rounded-xl bg-[#EBE9E0] text-[#3B523E] text-xs font-medium mb-4">
-                {docMsg}
-              </div>
-            )}
-
-            <form onSubmit={handleUploadEvidence} className="space-y-4 text-sm">
-              <input
-                required
-                placeholder="Nombre de la cooperativa o negocio"
-                value={docBusiness}
-                onChange={(e) => setDocBusiness(e.target.value)}
-                className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-              />
-              <input
-                required
-                placeholder="Categoría (Naturaleza, Cultura, Relax)"
-                value={docCategory}
-                onChange={(e) => setDocCategory(e.target.value)}
-                className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-              />
-              <textarea
-                rows={3}
-                placeholder="Descripción de prácticas regenerativas y manejo de residuos"
-                value={docDesc}
-                onChange={(e) => setDocDesc(e.target.value)}
-                className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl p-4"
-              />
-              <input
-                type="file"
-                onChange={(e) => setDocFile(e.target.files?.[0] || null)}
-                className="w-full text-xs"
-              />
-              <button
-                type="submit"
-                className="w-full bg-[#728C69] hover:bg-[#5B7153] text-white font-medium rounded-xl h-12"
-              >
-                Enviar Expediente a Auditoría
-              </button>
-            </form>
-          </div>
-        </main>
-      )}
-
-      {/* VISTA 9: PROVEEDOR - PUBLICAR EXPERIENCIA */}
-      {view === "negocio-dashboard" && (
-        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-10">
-          <div className="bg-white dark:bg-[#2A312C] rounded-3xl p-8 shadow-sm">
-            <h1 className="font-serif text-3xl mb-2">Publicar Nueva Experiencia</h1>
-            <p className="text-sm text-muted-foreground mb-6">
-              Registra una actividad ecoturística con límite de capacidad de carga en CDMX.
-            </p>
-
-            {expMsg && (
-              <div className="p-3 rounded-xl bg-[#EBE9E0] text-[#3B523E] text-xs font-medium mb-4">
-                {expMsg}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateExperience} className="space-y-4 text-sm">
-              <input
-                required
-                placeholder="Título de la experiencia"
-                value={newExp.title}
-                onChange={(e) => setNewExp({ ...newExp, title: e.target.value })}
-                className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-              />
-              <div className="grid grid-cols-2 gap-3">
-                <input
-                  placeholder="Alcaldía CDMX"
-                  value={newExp.borough_cdmx}
-                  onChange={(e) => setNewExp({ ...newExp, borough_cdmx: e.target.value })}
-                  className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-                />
-                <input
-                  placeholder="Categoría"
-                  value={newExp.category}
-                  onChange={(e) => setNewExp({ ...newExp, category: e.target.value })}
-                  className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <input
-                  type="number"
-                  placeholder="Precio MXN"
-                  value={newExp.price}
-                  onChange={(e) => setNewExp({ ...newExp, price: Number(e.target.value) })}
-                  className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-                />
-                <input
-                  type="number"
-                  placeholder="Minutos"
-                  value={newExp.duration_minutes}
-                  onChange={(e) =>
-                    setNewExp({ ...newExp, duration_minutes: Number(e.target.value) })
-                  }
-                  className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-                />
-                <input
-                  type="number"
-                  placeholder="Cupo máx"
-                  value={newExp.max_capacity}
-                  onChange={(e) => setNewExp({ ...newExp, max_capacity: Number(e.target.value) })}
-                  className="bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl px-4 h-12"
-                />
-              </div>
-              <textarea
-                rows={3}
-                placeholder="Prácticas sustentables verificables"
-                value={newExp.sustainable_practices}
-                onChange={(e) =>
-                  setNewExp({ ...newExp, sustainable_practices: e.target.value })
-                }
-                className="w-full bg-[#F2EFE9] dark:bg-[#18201C] rounded-xl p-4"
-              />
-              <button
-                type="submit"
-                className="w-full bg-[#C81D77] hover:bg-[#A91864] text-white font-medium rounded-xl h-12"
-              >
-                Publicar en Catálogo
-              </button>
-            </form>
-          </div>
         </main>
       )}
 

@@ -28,30 +28,37 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
     try {
       if (mode === "register") {
-        const payload: any = {
-          email,
+        const payload: Record<string, any> = {
+          email: email.trim(),
           password,
-          full_name: name,
+          full_name: name.trim(),
           role,
           preferred_language: "es",
         };
+
         if (role === "PROVIDER") {
-          payload.business_name = businessName || `${name} Ecoturismo`;
-          payload.rfc = rfc || "XAXX010101000";
+          payload.business_name = businessName.trim() || `${name.trim()} Ecoturismo`;
+          payload.rfc = rfc.trim().toUpperCase();
         }
+
         const res = await apiFetch<any>("/api/auth/users/register", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        saveUserSession(res.access_token, res.role, name || email);
+
+        saveUserSession(res.access_token, res.role, name.trim() || email.trim());
         setSuccess("Cuenta creada correctamente. Redirigiendo...");
         setTimeout(onSuccess, 500);
       } else {
         const res = await apiFetch<any>("/api/auth/users/login", {
           method: "POST",
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+          }),
         });
-        saveUserSession(res.access_token, res.role, email);
+
+        saveUserSession(res.access_token, res.role, email.trim());
         onSuccess();
       }
     } catch (err: any) {
@@ -159,6 +166,7 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
                     </label>
                     <input
                       required
+                      disabled={loading}
                       placeholder="Chinampas Vivas SC"
                       value={businessName}
                       onChange={(e) => setBusinessName(e.target.value)}
@@ -167,14 +175,16 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-                      RFC
+                      RFC (12 o 13 caracteres)
                     </label>
                     <input
                       required
+                      disabled={loading}
+                      maxLength={13}
                       placeholder="CVI260101ABC"
                       value={rfc}
-                      onChange={(e) => setRfc(e.target.value)}
-                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-sm rounded-xl px-4 h-12"
+                      onChange={(e) => setRfc(e.target.value.toUpperCase())}
+                      className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-sm rounded-xl px-4 h-12 uppercase"
                     />
                   </div>
                 </div>
@@ -215,14 +225,14 @@ export default function AuthViews({ initialError = "", onSuccess }: AuthViewsPro
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[#232621] dark:text-[#D1D5CD]">
-              Contraseña
+              Contraseña {mode === "register" && "(mín. 12 caracteres, mayúscula, número y símbolo)"}
             </label>
             <input
               required
               disabled={loading}
               type="password"
-              minLength={6}
-              placeholder="••••••••"
+              minLength={mode === "register" ? 12 : 6}
+              placeholder={mode === "register" ? "Ej. Password123!" : "••••••••"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-[#F2EFE9] dark:bg-[#18201C] text-[#232621] dark:text-white placeholder-[#8C9287] rounded-xl px-4 h-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#C81D77]/50"
